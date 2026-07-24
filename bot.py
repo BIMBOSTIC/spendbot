@@ -1,0 +1,91 @@
+import datetime
+import logging
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
+from config import TELEGRAM_TOKEN
+from handlers.start import build_handler as start_conv
+from handlers.expense import handle_text, handle_category_pick
+from handlers.undo import undo, build_edit_handler
+from handlers.gave import gave_summary
+from handlers.borrow import borrow, repaid, balances
+from handlers.summary import summary_command
+from handlers.trends import trends_command
+from handlers.digest import digest_command, send_weekly_digests
+
+logging.basicConfig(
+    format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+HELP_TEXT = (
+    "Daily Spend — commands\n\n"
+    "Just type expenses naturally:\n"
+    "  bread 100, milk 88\n"
+    "  gave pedro 500 for data\n"
+    "  borrow 2000 from mum\n\n"
+    "/undo        — remove the last entry\n"
+    "/edit        — pick a recent entry to delete and retype\n"
+    "/gave        — per-person GAVE totals\n"
+    "/borrow      — log borrowed money  (/borrow 2000 from mum)\n"
+    "/repaid      — log a repayment     (/repaid 500 to mum)\n"
+    "/balances    — open borrow balances\n"
+    "/summary     — spending summary  (today/week/month/year/jan 10)\n"
+    "               filter by category: /summary week food\n"
+    "/trends      — price history chart for an item\n"
+    "/digest      — toggle weekly Monday summary  (on/off)\n"
+    "/help        — this message"
+)
+
+
+async def help_command(update: Update, _) -> None:
+    await update.message.reply_text(HELP_TEXT)
+
+
+async def error_handler(update: object, context) -> None:
+    logger.exception("Unhandled error: %s", context.error)
+    if isinstance(update, Update) and update.message:
+        await update.message.reply_text("Something went wrong — please try again.")
+
+
+def main() -> None:
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # ConversationHandlers must be registered before catch-all handlers
+    app.add_handler(start_conv())
+    app.add_handler(build_edit_handler())
+
+    app.add_handler(CommandHandler("undo",     undo))
+    app.add_handler(CommandHandler("gave",     gave_summary))
+    app.add_handler(CommandHandler("borrow",   borrow))
+    app.add_handler(CommandHandler("repaid",   repaid))
+    app.add_handler(CommandHandler("balances", balances))
+    app.add_handler(CommandHandler("summary",  summary_command))
+    app.add_handler(CommandHandler("trends",   trends_command))
+    app.add_handler(CommandHandler("digest",   digest_command))
+    app.add_handler(CommandHandler("help",     help_command))
+
+    app.add_handler(CallbackQueryHandler(handle_category_pick, pattern=r"^cat_pick:"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    app.add_error_handler(error_handler)
+
+    # Weekly digest — every Monday at 08:00 UTC
+    app.job_queue.run_daily(
+        send_weekly_digests,
+        time=datetime.time(8, 0, 0),
+        days=(0,),
+    )
+
+    logger.info("Bot started — polling for updates...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,117 @@
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
+from db.client import get_db
+
+logger = logging.getLogger(__name__)
+
+ASK_CURRENCY = 0
+
+DEFAULT_CATEGORIES = ["FOOD", "TRANSPORT", "BILLS", "CLOTH", "GAVE", "BORROW", "OTHERS"]
+
+CURRENCY_OPTIONS = [
+    ("TRY (Turkish Lira)", "TRY"),
+    ("USD (US Dollar)",    "USD"),
+    ("EUR (Euro)",         "EUR"),
+    ("GBP (British Pound)","GBP"),
+]
+
+CURRENCY_SYMBOLS = {"TRY": "₺", "USD": "$", "EUR": "€", "GBP": "£"}
+
+WELCOME_TEXT = (
+    "Welcome to Daily Spend!\n\n"
+    "Log expenses by just typing naturally:\n"
+    "  bread 100, milk 88, transport 50\n"
+    "  gave pedro 500 for data\n\n"
+    "What currency should I use?"
+)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    tg_user = update.effective_user
+    db = get_db()
+
+    result = db.table("users").select("id, display_name").eq("telegram_id", tg_user.id).execute()
+
+    if result.data:
+        name = result.data[0].get("display_name") or tg_user.first_name
+        await update.message.reply_text(
+            f"Welcome back, {name}!\n"
+            "Ready to log. Just type your expenses."
+        )
+        return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=f"currency:{code}")]
+        for label, code in CURRENCY_OPTIONS
+    ]
+    await update.message.reply_text(
+        WELCOME_TEXT,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return ASK_CURRENCY
+
+
+async def set_currency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    currency = query.data.split(":")[1]
+    tg_user = query.from_user
+    db = get_db()
+
+    insert_result = (
+        db.table("users")
+        .insert({
+            "telegram_id":  tg_user.id,
+            "display_name": tg_user.first_name,
+            "currency":     currency,
+            "timezone":     "Europe/Istanbul",
+        })
+        .execute()
+    )
+
+    user_id = insert_result.data[0]["id"]
+    _seed_categories(db, user_id)
+
+    symbol = CURRENCY_SYMBOLS.get(currency, currency)
+    await query.edit_message_text(
+        f"All set! Using {currency} ({symbol}).\n\n"
+        "Start logging:\n"
+        "  bread 100, milk 88\n"
+        "  gave pedro 500\n\n"
+        "Commands: /summary  /trends  /undo  /help"
+    )
+    return ConversationHandler.END
+
+
+def _seed_categories(db, user_id: str) -> None:
+    db.table("categories").insert([
+        {"user_id": user_id, "name": cat, "is_default": True}
+        for cat in DEFAULT_CATEGORIES
+    ]).execute()
+
+
+async def _remind_currency(update: Update, _: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Please pick a currency first to get started.")
+    return ASK_CURRENCY
+
+
+def build_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            ASK_CURRENCY: [
+                CallbackQueryHandler(set_currency, pattern=r"^currency:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, _remind_currency),
+            ],
+        },
+        fallbacks=[CommandHandler("start", start)],
+    )

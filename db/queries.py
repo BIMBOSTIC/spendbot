@@ -1,0 +1,383 @@
+from __future__ import annotations
+from datetime import date, datetime, timezone
+from db.client import get_db
+
+
+# ── User ─────────────────────────────────────────────────────────────────────
+
+def get_user(telegram_id: int) -> dict | None:
+    r = get_db().table("users").select("*").eq("telegram_id", telegram_id).execute()
+    return r.data[0] if r.data else None
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+def get_category_id(user_id: str, name: str) -> str | None:
+    r = (
+        get_db().table("categories")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("name", name)
+        .execute()
+    )
+    return r.data[0]["id"] if r.data else None
+
+
+# ── Items ─────────────────────────────────────────────────────────────────────
+
+def get_or_create_item(user_id: str, canonical_name: str, category_id: str | None) -> str:
+    db = get_db()
+    r = (
+        db.table("items")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("canonical_name", canonical_name)
+        .execute()
+    )
+    if r.data:
+        return r.data[0]["id"]
+    ins = db.table("items").insert({
+        "user_id": user_id,
+        "canonical_name": canonical_name,
+        "category_id": category_id,
+    }).execute()
+    return ins.data[0]["id"]
+
+
+# ── Expense entries ───────────────────────────────────────────────────────────
+
+def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None) -> dict:
+    db = get_db()
+    entry = db.table("expense_entries").insert({
+        "user_id": user_id,
+        "raw_message": raw,
+        "category_id": category_id,
+        "total_amount": parsed["total_amount"],
+    }).execute().data[0]
+
+    for item in parsed.get("items", []):
+        item_id = get_or_create_item(user_id, item["name"], category_id)
+        db.table("line_items").insert({
+            "expense_entry_id": entry["id"],
+            "item_id": item_id,
+            "amount": item["amount"],
+        }).execute()
+
+    return entry
+
+
+def get_recent_entries(user_id: str, limit: int = 3) -> list[dict]:
+    r = (
+        get_db().table("expense_entries")
+        .select("id, total_amount, raw_message, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return r.data
+
+
+def get_last_entry(user_id: str) -> dict | None:
+    entries = get_recent_entries(user_id, limit=1)
+    return entries[0] if entries else None
+
+
+def delete_entry(entry_id: str, user_id: str) -> None:
+    get_db().table("expense_entries").delete().eq("id", entry_id).eq("user_id", user_id).execute()
+
+
+def get_daily_total(user_id: str) -> float:
+    today = date.today().isoformat()
+    r = (
+        get_db().table("expense_entries")
+        .select("total_amount")
+        .eq("user_id", user_id)
+        .gte("created_at", f"{today}T00:00:00")
+        .lte("created_at", f"{today}T23:59:59")
+        .execute()
+    )
+    return float(sum(row["total_amount"] for row in r.data))
+
+
+# ── Gave entries ──────────────────────────────────────────────────────────────
+
+def create_gave(user_id: str, raw: str, parsed: dict, category_id: str | None) -> dict:
+    db = get_db()
+    gave = parsed["gave"]
+    entry = db.table("expense_entries").insert({
+        "user_id": user_id,
+        "raw_message": raw,
+        "category_id": category_id,
+        "total_amount": gave["amount"],
+    }).execute().data[0]
+
+    db.table("gave_entries").insert({
+        "expense_entry_id": entry["id"],
+        "recipient_name": gave["recipient"].lower().strip(),
+        "amount": gave["amount"],
+    }).execute()
+
+    return entry
+
+
+def get_gave_total_ytd(user_id: str, recipient: str) -> float:
+    year_start = f"{date.today().year}-01-01T00:00:00"
+    db = get_db()
+    entries = (
+        db.table("expense_entries")
+        .select("id")
+        .eq("user_id", user_id)
+        .gte("created_at", year_start)
+        .execute()
+    )
+    if not entries.data:
+        return 0.0
+    ids = [e["id"] for e in entries.data]
+    gave = (
+        db.table("gave_entries")
+        .select("amount")
+        .eq("recipient_name", recipient.lower().strip())
+        .in_("expense_entry_id", ids)
+        .execute()
+    )
+    return float(sum(row["amount"] for row in gave.data))
+
+
+def get_gave_summary(user_id: str) -> list[dict]:
+    db = get_db()
+    entries = (
+        db.table("expense_entries")
+        .select("id, created_at")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not entries.data:
+        return []
+
+    month_start = date.today().replace(day=1).isoformat()
+    entry_dates = {e["id"]: e["created_at"] for e in entries.data}
+    ids = list(entry_dates.keys())
+
+    gave = (
+        db.table("gave_entries")
+        .select("recipient_name, amount, expense_entry_id")
+        .in_("expense_entry_id", ids)
+        .execute()
+    )
+
+    summary: dict[str, dict] = {}
+    for row in gave.data:
+        name = row["recipient_name"]
+        if name not in summary:
+            summary[name] = {"recipient": name.title(), "total": 0.0, "this_month": 0.0}
+        amount = float(row["amount"])
+        summary[name]["total"] += amount
+        created_at = entry_dates.get(row["expense_entry_id"], "")
+        if created_at[:10] >= month_start:
+            summary[name]["this_month"] += amount
+
+    return sorted(summary.values(), key=lambda x: x["total"], reverse=True)
+
+
+# ── Borrow ledger ─────────────────────────────────────────────────────────────
+
+def create_borrow_entry(user_id: str, counterparty: str, amount: float, direction: str, note: str = "") -> dict:
+    r = get_db().table("borrow_entries").insert({
+        "user_id": user_id,
+        "counterparty_name": counterparty.lower().strip(),
+        "amount": amount,
+        "direction": direction,
+        "note": note or None,
+    }).execute()
+    return r.data[0]
+
+
+def get_borrow_balances(user_id: str) -> list[dict]:
+    r = (
+        get_db().table("borrow_entries")
+        .select("counterparty_name, amount, direction")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    ledger: dict[str, dict] = {}
+    for row in r.data:
+        name = row["counterparty_name"]
+        if name not in ledger:
+            ledger[name] = {"counterparty": name.title(), "borrowed": 0.0, "repaid": 0.0}
+        if row["direction"] == "borrowed":
+            ledger[name]["borrowed"] += float(row["amount"])
+        else:
+            ledger[name]["repaid"] += float(row["amount"])
+
+    result = [
+        {
+            "counterparty": data["counterparty"],
+            "balance": data["borrowed"] - data["repaid"],
+            "borrowed": data["borrowed"],
+            "repaid": data["repaid"],
+        }
+        for data in ledger.values()
+    ]
+    return sorted(result, key=lambda x: abs(x["balance"]), reverse=True)
+
+
+def get_gave_total_period(user_id: str, start: str, end: str) -> float:
+    db = get_db()
+    entries = (
+        db.table("expense_entries")
+        .select("id")
+        .eq("user_id", user_id)
+        .gte("created_at", start)
+        .lte("created_at", end)
+        .execute()
+    )
+    if not entries.data:
+        return 0.0
+    ids = [e["id"] for e in entries.data]
+    gave = (
+        db.table("gave_entries")
+        .select("amount")
+        .in_("expense_entry_id", ids)
+        .execute()
+    )
+    return float(sum(row["amount"] for row in gave.data))
+
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+
+def get_summary(user_id: str, start: str, end: str, category: str | None = None) -> dict:
+    r = (
+        get_db().table("expense_entries")
+        .select("total_amount, categories(name)")
+        .eq("user_id", user_id)
+        .gte("created_at", start)
+        .lte("created_at", end)
+        .execute()
+    )
+
+    excluded = {"BORROW"}
+    total = 0.0
+    by_cat: dict[str, float] = {}
+
+    for row in r.data:
+        cat_row = row.get("categories")
+        cat_name = cat_row["name"] if cat_row else "OTHERS"
+        if cat_name in excluded:
+            continue
+        if category and cat_name != category.upper():
+            continue
+        amt = float(row["total_amount"])
+        total += amt
+        by_cat[cat_name] = by_cat.get(cat_name, 0.0) + amt
+
+    return {
+        "total": total,
+        "by_category": sorted(
+            [{"name": k, "total": v} for k, v in by_cat.items()],
+            key=lambda x: x["total"],
+            reverse=True,
+        ),
+    }
+
+
+# ── Digest settings ──────────────────────────────────────────────────────────
+
+def update_digest_setting(user_id: str, enabled: bool) -> None:
+    get_db().table("users").update({"weekly_digest": enabled}).eq("id", user_id).execute()
+
+
+def get_digest_users() -> list[dict]:
+    r = get_db().table("users").select("*").eq("weekly_digest", True).execute()
+    return r.data
+
+
+# ── Price history ─────────────────────────────────────────────────────────────
+
+def get_item_price_history(user_id: str, canonical_name: str) -> list[dict]:
+    db = get_db()
+    item_r = (
+        db.table("items")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("canonical_name", canonical_name)
+        .execute()
+    )
+    if not item_r.data:
+        return []
+    item_id = item_r.data[0]["id"]
+
+    li = (
+        db.table("line_items")
+        .select("amount, expense_entries(created_at)")
+        .eq("item_id", item_id)
+        .execute()
+    )
+
+    results = [
+        {
+            "date": row["expense_entries"]["created_at"][:10],
+            "amount": float(row["amount"]),
+        }
+        for row in li.data
+        if row.get("expense_entries")
+    ]
+    return sorted(results, key=lambda x: x["date"])
+
+
+def search_items(user_id: str, query: str) -> list[str]:
+    r = (
+        get_db().table("items")
+        .select("canonical_name")
+        .eq("user_id", user_id)
+        .ilike("canonical_name", f"%{query.lower()}%")
+        .execute()
+    )
+    return [row["canonical_name"] for row in r.data]
+
+
+def get_price_change_leaders(user_id: str, top_n: int = 5) -> list[dict]:
+    db = get_db()
+    items_r = (
+        db.table("items")
+        .select("id, canonical_name")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not items_r.data:
+        return []
+
+    results = []
+    for item in items_r.data:
+        li = (
+            db.table("line_items")
+            .select("amount, expense_entries(created_at)")
+            .eq("item_id", item["id"])
+            .execute()
+        )
+        entries = sorted(
+            [
+                {"date": row["expense_entries"]["created_at"][:10], "amount": float(row["amount"])}
+                for row in li.data
+                if row.get("expense_entries")
+            ],
+            key=lambda x: x["date"],
+        )
+        if len(entries) < 2:
+            continue
+        first, last = entries[0], entries[-1]
+        if first["amount"] == 0:
+            continue
+        change_pct = ((last["amount"] - first["amount"]) / first["amount"]) * 100
+        results.append({
+            "name": item["canonical_name"],
+            "first_amount": first["amount"],
+            "last_amount": last["amount"],
+            "first_date": first["date"],
+            "last_date": last["date"],
+            "change_pct": change_pct,
+            "count": len(entries),
+        })
+
+    return sorted(results, key=lambda x: abs(x["change_pct"]), reverse=True)[:top_n]
