@@ -17,6 +17,8 @@ from handlers.borrow import borrow, repaid, balances
 from handlers.summary import summary_command
 from handlers.trends import trends_command
 from handlers.digest import digest_command, send_weekly_digests
+from handlers.wallet import build_wallet_handler, winrate_command, trades_command, send_daily_wallet_reports
+from handlers.savings import build_saving_handler, saved_command, savings_command
 
 logging.basicConfig(
     format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
@@ -40,6 +42,12 @@ HELP_TEXT = (
     "               filter by category: /summary week food\n"
     "/trends      — price history chart for an item\n"
     "/digest      — toggle weekly Monday summary  (on/off)\n"
+    "/wallet      — manage tracked Solana wallets  (/wallet add)\n"
+    "/winrate     — trade win rate  (today/week/month/all)\n"
+    "/trades      — recent trades   (today/week/month)\n"
+    "/saving      — set daily savings target  (/saving set <amount> to update)\n"
+    "/saved       — log today's saving  (/saved 500)\n"
+    "/savings     — savings summary  (today/week/month/all)\n"
     "/help        — this message"
 )
 
@@ -60,6 +68,8 @@ def main() -> None:
     # ConversationHandlers must be registered before catch-all handlers
     app.add_handler(start_conv())
     app.add_handler(build_edit_handler())
+    app.add_handler(build_wallet_handler())
+    app.add_handler(build_saving_handler())
 
     app.add_handler(CommandHandler("undo",     undo))
     app.add_handler(CommandHandler("gave",     gave_summary))
@@ -69,6 +79,10 @@ def main() -> None:
     app.add_handler(CommandHandler("summary",  summary_command))
     app.add_handler(CommandHandler("trends",   trends_command))
     app.add_handler(CommandHandler("digest",   digest_command))
+    app.add_handler(CommandHandler("winrate",  winrate_command))
+    app.add_handler(CommandHandler("trades",   trades_command))
+    app.add_handler(CommandHandler("saved",    saved_command))
+    app.add_handler(CommandHandler("savings",  savings_command))
     app.add_handler(CommandHandler("help",     help_command))
 
     app.add_handler(CallbackQueryHandler(handle_category_pick, pattern=r"^cat_pick:"))
@@ -81,6 +95,12 @@ def main() -> None:
         send_weekly_digests,
         time=datetime.time(8, 0, 0),
         days=(0,),
+    )
+
+    # Daily wallet P&L report — every day at 21:00 UTC
+    app.job_queue.run_daily(
+        send_daily_wallet_reports,
+        time=datetime.time(21, 0, 0),
     )
 
     logger.info("Bot started — polling for updates...")
