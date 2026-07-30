@@ -3,11 +3,11 @@ from datetime import datetime, timezone
 from db.client import get_db
 
 
-def add_wallet(user_id: str, address: str, label: str | None) -> dict:
+def add_wallet(user_id: str, address: str, label: str | None, chain: str = "SOL") -> dict:
     r = get_db().table("tracked_wallets").insert({
         "user_id": user_id,
         "address": address,
-        "chain": "SOL",
+        "chain": chain,
         "label": label,
     }).execute()
     return r.data[0]

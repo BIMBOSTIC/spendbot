@@ -42,7 +42,7 @@ HELP_TEXT = (
     "               filter by category: /summary week food\n"
     "/trends      — price history chart for an item\n"
     "/digest      — toggle weekly Monday summary  (on/off)\n"
-    "/wallet      — manage tracked Solana wallets  (/wallet add)\n"
+    "/wallet      — manage tracked wallets  (/wallet add) — SOL, ETH, BASE, BNB, ARB, AVAX, RHC\n"
     "/winrate     — trade win rate  (today/week/month/all)\n"
     "/trades      — recent trades   (today/week/month)\n"
     "/saving      — set daily savings target  (/saving set <amount> to update)\n"
