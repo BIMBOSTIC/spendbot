@@ -69,13 +69,23 @@ def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None
 def get_recent_entries(user_id: str, limit: int = 3) -> list[dict]:
     r = (
         get_db().table("expense_entries")
-        .select("id, total_amount, raw_message, created_at")
+        .select("id, total_amount, raw_message, created_at, category_id")
         .eq("user_id", user_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
     )
     return r.data
+
+
+def restore_expense_entry(user_id: str, raw: str, total_amount: float, category_id: str | None) -> dict:
+    r = get_db().table("expense_entries").insert({
+        "user_id": user_id,
+        "raw_message": raw,
+        "category_id": category_id,
+        "total_amount": total_amount,
+    }).execute()
+    return r.data[0]
 
 
 def get_last_entry(user_id: str) -> dict | None:
@@ -243,6 +253,37 @@ def get_gave_total_period(user_id: str, start: str, end: str) -> float:
         .execute()
     )
     return float(sum(row["amount"] for row in gave.data))
+
+
+# ── Lend ledger ──────────────────────────────────────────────────────────────
+
+def get_lend_balances(user_id: str) -> list[dict]:
+    r = (
+        get_db().table("borrow_entries")
+        .select("counterparty_name, amount, direction")
+        .eq("user_id", user_id)
+        .in_("direction", ["lent", "lent_repaid"])
+        .execute()
+    )
+    ledger: dict[str, dict] = {}
+    for row in r.data:
+        name = row["counterparty_name"]
+        if name not in ledger:
+            ledger[name] = {"counterparty": name.title(), "lent": 0.0, "repaid": 0.0}
+        if row["direction"] == "lent":
+            ledger[name]["lent"] += float(row["amount"])
+        else:
+            ledger[name]["repaid"] += float(row["amount"])
+    result = [
+        {
+            "counterparty": data["counterparty"],
+            "outstanding": data["lent"] - data["repaid"],
+            "lent": data["lent"],
+            "repaid": data["repaid"],
+        }
+        for data in ledger.values()
+    ]
+    return sorted(result, key=lambda x: abs(x["outstanding"]), reverse=True)
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────

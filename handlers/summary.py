@@ -1,3 +1,4 @@
+import calendar
 import logging
 import re
 from datetime import date, timedelta
@@ -10,6 +11,16 @@ logger = logging.getLogger(__name__)
 
 _RANGE_RE = re.compile(r'(?:from\s+)?(.+?)\s+to\s+(.+)', re.IGNORECASE)
 
+KNOWN_CATEGORIES = {"FOOD", "TRANSPORT", "BILLS", "CLOTH", "GAVE", "BORROW", "OTHERS"}
+
+_MONTH_MAP: dict[str, int] = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "june": 6, "july": 7, "august": 8, "september": 9,
+    "october": 10, "november": 11, "december": 12,
+}
+
 
 def _date_label(d: date, today: date) -> str:
     return f"{d.day} {d.strftime('%b') if d.year == today.year else d.strftime('%b %Y')}"
@@ -18,7 +29,13 @@ def _date_label(d: date, today: date) -> str:
 def _resolve_period(arg: str) -> tuple[str, str, str]:
     """Return (start_iso, end_iso, label) for a natural-language period string."""
     today = date.today()
-    a = arg.lower().strip()
+    a     = arg.lower().strip()
+
+    # Strip "this " / "current " prefix
+    for prefix in ("this ", "current "):
+        if a.startswith(prefix):
+            a = a[len(prefix):]
+            break
 
     if a in ("today", ""):
         return f"{today.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", "Today"
@@ -28,21 +45,62 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
     if a == "week":
         start = today - timedelta(days=today.weekday())
         return f"{start.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", "This week"
+    if a in ("last week", "previous week", "prev week"):
+        end   = today - timedelta(days=today.weekday() + 1)
+        start = end - timedelta(days=6)
+        return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", "Last week"
     if a == "month":
         start = today.replace(day=1)
         return f"{start.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", "This month"
+    if a in ("last month", "previous month", "prev month"):
+        first_this = today.replace(day=1)
+        end        = first_this - timedelta(days=1)
+        start      = end.replace(day=1)
+        return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", end.strftime("%B %Y")
     if a == "year":
         start = today.replace(month=1, day=1)
         return f"{start.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", "This year"
+    if a in ("last year", "previous year", "prev year"):
+        y     = today.year - 1
+        start = date(y, 1, 1)
+        end   = date(y, 12, 31)
+        return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", str(y)
+
+    # 4-digit year: "2024", "2025"
+    if re.fullmatch(r"\d{4}", a):
+        y     = int(a)
+        start = date(y, 1, 1)
+        end   = min(date(y, 12, 31), today)
+        return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", str(y)
+
+    # Month name, optionally with year: "jan", "july", "march 2024", "jan 2025"
+    words     = a.split()
+    month_num = _MONTH_MAP.get(words[0])
+    if month_num:
+        year = today.year
+        if len(words) >= 2:
+            try:
+                year = int(words[-1])
+            except ValueError:
+                pass
+        # If the target month is in the future, step back a year
+        target_start = date(year, month_num, 1)
+        if target_start > today:
+            year         -= 1
+            target_start  = date(year, month_num, 1)
+        last_day   = calendar.monthrange(year, month_num)[1]
+        target_end = min(date(year, month_num, last_day), today)
+        label      = target_start.strftime("%B %Y")
+        return f"{target_start.isoformat()}T00:00:00", f"{target_end.isoformat()}T23:59:59", label
 
     # Date range: "jan 10 to jan 20" or "from jan 10 to jan 20"
     m = _RANGE_RE.match(a)
     if m:
         try:
             from dateutil import parser as dup
-            default = date(today.year, 1, 1)
-            start_d = dup.parse(m.group(1).strip(), default=default, dayfirst=False).date()
-            end_d = dup.parse(m.group(2).strip(), default=default, dayfirst=False).date()
+            default  = date(today.year, 1, 1)
+            start_d  = dup.parse(m.group(1).strip(), default=default, dayfirst=False).date()
+            end_d    = dup.parse(m.group(2).strip(), default=default, dayfirst=False).date()
         except Exception:
             raise ValueError(f"Can't parse date range: {arg!r}")
         if end_d > today:
@@ -56,15 +114,12 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
     try:
         from dateutil import parser as dup
         parsed_dt = dup.parse(arg, default=date(today.year, 1, 1), dayfirst=False)
-        d = parsed_dt.date()
+        d         = parsed_dt.date()
         if d > today:
             d = d.replace(year=d.year - 1)
         return f"{d.isoformat()}T00:00:00", f"{d.isoformat()}T23:59:59", _date_label(d, today)
     except Exception:
         raise ValueError(f"Can't parse date: {arg!r}")
-
-
-_KNOWN_CATEGORIES = {"FOOD", "TRANSPORT", "BILLS", "CLOTH", "GAVE", "BORROW", "OTHERS"}
 
 
 async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str | None = None) -> None:
@@ -73,15 +128,14 @@ async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str 
     except ValueError:
         await reply_fn(
             "Couldn't understand that date.\n"
-            "Try: today · yesterday · week · month · year\n"
-            "     jan 10 · january 10 2024\n"
-            "     jan 10 to jan 20 · from jan 1 to jan 31"
+            "Try: today · yesterday · week · last week · month · last month · year\n"
+            "     jan · july · march 2024 · jan 10 · jan 10 to jan 20"
         )
         return
 
-    data = get_summary(user_row["id"], start, end, category=category)
+    data     = get_summary(user_row["id"], start, end, category=category)
     currency = user_row["currency"]
-    header = f"{label}" + (f" · {category.title()}" if category else "")
+    header   = label + (f" · {category.title()}" if category else "")
 
     if data["total"] == 0:
         await reply_fn(f"No expenses logged for {header.lower()}.")
@@ -103,13 +157,16 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("Please run /start first.")
         return
 
-    args = context.args or []
+    args     = context.args or []
     category = None
+    period_parts: list[str] = []
 
-    # If last arg looks like a category name, treat it as a filter
-    if args and args[-1].upper() in _KNOWN_CATEGORIES:
-        category = args[-1].upper()
-        args = args[:-1]
+    # Extract category from anywhere in args
+    for arg in args:
+        if arg.upper() in KNOWN_CATEGORIES:
+            category = arg.upper()
+        else:
+            period_parts.append(arg)
 
-    period_arg = " ".join(args) if args else "today"
+    period_arg = " ".join(period_parts) if period_parts else "today"
     await send_summary(update.message.reply_text, user_row, period_arg, category=category)

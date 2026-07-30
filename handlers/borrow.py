@@ -56,12 +56,17 @@ async def handle_borrow_text(reply_fn, user_row: dict, parsed: dict) -> None:
     if not borrow_data:
         await reply_fn("Couldn't parse that. Try: /borrow 2000 from mum")
         return
+    direction = borrow_data.get("direction", "borrowed")
+    if direction in ("lent", "lent_repaid", "collected"):
+        from handlers.lend import handle_lend_text
+        await handle_lend_text(reply_fn, user_row, parsed)
+        return
     await _log_and_confirm(
         reply_fn,
         user_row,
         borrow_data["counterparty"],
         borrow_data["amount"],
-        borrow_data["direction"],
+        direction,
     )
 
 

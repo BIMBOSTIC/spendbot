@@ -11,7 +11,7 @@ from telegram.ext import (
 from config import TELEGRAM_TOKEN
 from handlers.start import build_handler as start_conv
 from handlers.expense import handle_text, handle_category_pick
-from handlers.undo import undo, build_edit_handler
+from handlers.undo import undo, redo, build_edit_handler
 from handlers.gave import gave_summary
 from handlers.borrow import borrow, repaid, balances
 from handlers.summary import summary_command
@@ -19,6 +19,7 @@ from handlers.trends import trends_command
 from handlers.digest import digest_command, send_weekly_digests
 from handlers.wallet import build_wallet_handler, winrate_command, trades_command, send_daily_wallet_reports
 from handlers.savings import build_saving_handler, saved_command, savings_command
+from handlers.lend import lend
 
 logging.basicConfig(
     format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
@@ -31,15 +32,20 @@ HELP_TEXT = (
     "Just type expenses naturally:\n"
     "  bread 100, milk 88\n"
     "  gave pedro 500 for data\n"
-    "  borrow 2000 from mum\n\n"
+    "  borrow 2000 from mum\n"
+    "  lent pedro 500\n\n"
     "/undo        — remove the last entry\n"
-    "/edit        — pick a recent entry to delete and retype\n"
+    "/redo        — restore after undo\n"
+    "/edit        — pick a recent entry to fix\n"
     "/gave        — per-person GAVE totals\n"
     "/borrow      — log borrowed money  (/borrow 2000 from mum)\n"
     "/repaid      — log a repayment     (/repaid 500 to mum)\n"
     "/balances    — open borrow balances\n"
-    "/summary     — spending summary  (today/week/month/year/jan 10)\n"
-    "               filter by category: /summary week food\n"
+    "/lend        — log money you lent   (/lend 500 to pedro)\n"
+    "/lend repaid — log when they pay back  (/lend repaid 500 from pedro)\n"
+    "/lend balances — who owes you\n"
+    "/summary     — spending summary  (today/week/last week/month/last month/year/jan/july 2024)\n"
+    "               filter by category: /summary food week\n"
     "/trends      — price history chart for an item\n"
     "/digest      — toggle weekly Monday summary  (on/off)\n"
     "/wallet      — manage tracked wallets  (/wallet add) — SOL, ETH, BASE, BNB, ARB, AVAX, RHC\n"
@@ -72,6 +78,8 @@ def main() -> None:
     app.add_handler(build_saving_handler())
 
     app.add_handler(CommandHandler("undo",     undo))
+    app.add_handler(CommandHandler("redo",     redo))
+    app.add_handler(CommandHandler("lend",     lend))
     app.add_handler(CommandHandler("gave",     gave_summary))
     app.add_handler(CommandHandler("borrow",   borrow))
     app.add_handler(CommandHandler("repaid",   repaid))

@@ -8,7 +8,10 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-from db.queries import get_user, get_recent_entries, get_last_entry, delete_entry, get_daily_total
+from db.queries import (
+    get_user, get_recent_entries, get_last_entry,
+    delete_entry, get_daily_total, restore_expense_entry,
+)
 from utils import fmt
 
 logger = logging.getLogger(__name__)
@@ -30,8 +33,15 @@ async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     currency = user_row["currency"]
-    amount = entry["total_amount"]
-    raw = entry.get("raw_message") or ""
+    amount   = entry["total_amount"]
+    raw      = entry.get("raw_message") or ""
+
+    # Store for /redo
+    context.user_data["_redo"] = {
+        "raw":          raw,
+        "total_amount": float(amount),
+        "category_id":  entry.get("category_id"),
+    }
 
     delete_entry(entry["id"], user_row["id"])
     daily = get_daily_total(user_row["id"])
@@ -39,6 +49,36 @@ async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         f"Undone: {fmt(amount, currency)}"
         + (f'  ("{raw}")' if raw else "")
+        + f"\nToday so far: {fmt(daily, currency)}"
+        + "\n\nType /redo or 'redo' to restore it."
+    )
+
+
+# ── /redo ─────────────────────────────────────────────────────────────────────
+
+async def redo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_row = get_user(update.effective_user.id)
+    if not user_row:
+        await update.message.reply_text("Please run /start first.")
+        return
+
+    redo_data = context.user_data.pop("_redo", None)
+    if not redo_data:
+        await update.message.reply_text("Nothing to redo — only works right after /undo.")
+        return
+
+    restore_expense_entry(
+        user_row["id"],
+        redo_data["raw"],
+        redo_data["total_amount"],
+        redo_data["category_id"],
+    )
+    daily    = get_daily_total(user_row["id"])
+    currency = user_row["currency"]
+
+    await update.message.reply_text(
+        f"Restored: {fmt(redo_data['total_amount'], currency)}"
+        + (f'  ("{redo_data["raw"]}")' if redo_data.get("raw") else "")
         + f"\nToday so far: {fmt(daily, currency)}"
     )
 
@@ -51,12 +91,16 @@ async def edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Please run /start first.")
         return ConversationHandler.END
 
-    entries = get_recent_entries(user_row["id"], limit=3)
+    entries = get_recent_entries(user_row["id"], limit=5)
     if not entries:
         await update.message.reply_text("Nothing to edit.")
         return ConversationHandler.END
 
     currency = user_row["currency"]
+
+    # Store raw messages keyed by entry id so edit_pick can show them
+    context.user_data["_edit_raws"] = {e["id"]: e.get("raw_message") or "" for e in entries}
+
     keyboard = [
         [InlineKeyboardButton(
             f"{fmt(e['total_amount'], currency)}  \"{(e.get('raw_message') or '')[:30]}\"",
@@ -65,7 +109,7 @@ async def edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         for e in entries
     ]
     await update.message.reply_text(
-        "Which entry do you want to delete and retype?",
+        "Pick the entry to fix:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return PICK_EDIT
@@ -81,16 +125,22 @@ async def edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     entry_id = query.data.split(":")[1]
+    raws     = context.user_data.pop("_edit_raws", {})
+    raw      = raws.get(entry_id, "")
+
     delete_entry(entry_id, user_row["id"])
 
-    await query.edit_message_text(
-        "Entry deleted. Retype the corrected version now."
-    )
+    reply = "Entry deleted."
+    if raw:
+        reply += f'\n\nOld: "{raw}"\n\nSend the corrected version:'
+    else:
+        reply += "\n\nSend the corrected version:"
+
+    await query.edit_message_text(reply)
     return ConversationHandler.END
 
 
 async def _cancel_and_handle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """User typed something while waiting for edit pick — cancel edit and process it normally."""
     from handlers.expense import handle_text
     await handle_text(update, context)
     return ConversationHandler.END
