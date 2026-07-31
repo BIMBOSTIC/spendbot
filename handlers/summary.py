@@ -37,6 +37,7 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
             a = a[len(prefix):]
             break
 
+    # ── Exact keyword matches ─────────────────────────────────────────────────
     if a in ("today", ""):
         return f"{today.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", "Today"
     if a == "yesterday":
@@ -66,41 +67,23 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
         end   = date(y, 12, 31)
         return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", str(y)
 
-    # 4-digit year: "2024", "2025"
+    # ── 4-digit year: "2024", "2025" ─────────────────────────────────────────
     if re.fullmatch(r"\d{4}", a):
         y     = int(a)
         start = date(y, 1, 1)
         end   = min(date(y, 12, 31), today)
         return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", str(y)
 
-    # Month name, optionally with year: "jan", "july", "march 2024", "jan 2025"
-    words     = a.split()
-    month_num = _MONTH_MAP.get(words[0])
-    if month_num:
-        year = today.year
-        if len(words) >= 2:
-            try:
-                year = int(words[-1])
-            except ValueError:
-                pass
-        # If the target month is in the future, step back a year
-        target_start = date(year, month_num, 1)
-        if target_start > today:
-            year         -= 1
-            target_start  = date(year, month_num, 1)
-        last_day   = calendar.monthrange(year, month_num)[1]
-        target_end = min(date(year, month_num, last_day), today)
-        label      = target_start.strftime("%B %Y")
-        return f"{target_start.isoformat()}T00:00:00", f"{target_end.isoformat()}T23:59:59", label
-
-    # Date range: "jan 10 to jan 20" or "from jan 10 to jan 20"
+    # ── Date range: check BEFORE month name so "jul 1 to 31" isn't swallowed ─
     m = _RANGE_RE.match(a)
     if m:
         try:
             from dateutil import parser as dup
             default  = date(today.year, 1, 1)
             start_d  = dup.parse(m.group(1).strip(), default=default, dayfirst=False).date()
-            end_d    = dup.parse(m.group(2).strip(), default=default, dayfirst=False).date()
+            # Use start's month/year as default so "jul 1 to 31" → July 31
+            end_default = date(start_d.year, start_d.month, 1)
+            end_d    = dup.parse(m.group(2).strip(), default=end_default, dayfirst=False).date()
         except Exception:
             raise ValueError(f"Can't parse date range: {arg!r}")
         if end_d > today:
@@ -110,7 +93,25 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
         label = f"{_date_label(start_d, today)} – {_date_label(end_d, today)}"
         return f"{start_d.isoformat()}T00:00:00", f"{end_d.isoformat()}T23:59:59", label
 
-    # Single specific date: "jan 10", "jan 10th", "january 10 2024"
+    # ── Month name only, or month + 4-digit year: "jan", "july", "march 2024" ─
+    # Does NOT match "jan 10" or "jan 1 to 31" — those fall to the date parser.
+    words     = a.split()
+    month_num = _MONTH_MAP.get(words[0])
+    if month_num and (
+        len(words) == 1
+        or (len(words) == 2 and words[1].isdigit() and 1900 <= int(words[1]) <= 2100)
+    ):
+        year = today.year if len(words) == 1 else int(words[1])
+        target_start = date(year, month_num, 1)
+        if target_start > today:
+            year        -= 1
+            target_start = date(year, month_num, 1)
+        last_day   = calendar.monthrange(year, month_num)[1]
+        target_end = min(date(year, month_num, last_day), today)
+        label      = target_start.strftime("%B %Y")
+        return f"{target_start.isoformat()}T00:00:00", f"{target_end.isoformat()}T23:59:59", label
+
+    # ── Single specific date: "jan 10", "jan 10th", "january 10 2024" ─────────
     try:
         from dateutil import parser as dup
         parsed_dt = dup.parse(arg, default=date(today.year, 1, 1), dayfirst=False)
@@ -161,7 +162,6 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     category = None
     period_parts: list[str] = []
 
-    # Extract category from anywhere in args
     for arg in args:
         if arg.upper() in KNOWN_CATEGORIES:
             category = arg.upper()

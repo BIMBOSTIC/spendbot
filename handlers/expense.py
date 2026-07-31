@@ -24,8 +24,8 @@ CATEGORY_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("OTHERS",       callback_data="cat_pick:OTHERS")],
 ])
 
-# Categories where the LLM guess is often wrong — always confirm with the user
-_ASK_ALWAYS = {"CLOTH", "OTHERS"}
+# Only auto-save for these clearly unambiguous categories; ask for everything else
+_AUTO_SAVE_CATS = {"FOOD", "TRANSPORT", "BILLS"}
 
 # Canonical category names for free-text routing
 _CATS_LOWER = {"food", "transport", "bills", "cloth", "gave", "borrow", "others"}
@@ -66,9 +66,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await send_balances(update.message.reply_text, user_row)
         return
 
-    if text_lower in ("lend balances", "lend balance", "who owes me", "who owes me money"):
+    if text_lower in ("who owes me", "who owes me money"):
         from handlers.lend import send_lend_balances
         await send_lend_balances(update.message.reply_text, user_row)
+        return
+
+    # "lend", "lend balances", "lend 500 to pedro", "lend repaid 500 from pedro"
+    if text_lower == "lend" or text_lower.startswith("lend "):
+        context.args = text.split()[1:]
+        from handlers.lend import lend as lend_cmd
+        await lend_cmd(update, context)
         return
 
     if text_lower == "gave":
@@ -196,8 +203,9 @@ async def _handle_unknown(update, parsed: dict) -> None:
 
 
 async def _handle_expense(update, context, user_row, raw, parsed):
-    cat    = parsed.get("category")
-    amount = parsed.get("total_amount", 0)
+    raw_cat = parsed.get("category")
+    cat     = raw_cat.strip().upper() if raw_cat else None  # normalise LLM output
+    amount  = parsed.get("total_amount", 0)
 
     if amount == 0:
         items = parsed.get("items", [])
@@ -208,8 +216,8 @@ async def _handle_expense(update, context, user_row, raw, parsed):
         )
         return
 
-    # Always ask for CLOTH/OTHERS; also ask when ambiguous or no category
-    if parsed.get("ambiguous") or not cat or cat in _ASK_ALWAYS:
+    # Ask the user to pick unless it's one of the clearly obvious categories
+    if parsed.get("ambiguous") or not cat or cat not in _AUTO_SAVE_CATS:
         context.user_data[PENDING_KEY] = {"parsed": parsed, "raw": raw}
         await update.message.reply_text(
             f"Got {fmt(amount, user_row['currency'])} — what category?",

@@ -11,6 +11,7 @@ from telegram.ext import (
 from db.queries import (
     get_user, get_recent_entries, get_last_entry,
     delete_entry, get_daily_total, restore_expense_entry,
+    save_redo_state, pop_redo_state,
 )
 from utils import fmt
 
@@ -36,12 +37,8 @@ async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     amount   = entry["total_amount"]
     raw      = entry.get("raw_message") or ""
 
-    # Store for /redo
-    context.user_data["_redo"] = {
-        "raw":          raw,
-        "total_amount": float(amount),
-        "category_id":  entry.get("category_id"),
-    }
+    # Persist redo state in DB so it survives bot restarts
+    save_redo_state(user_row["id"], raw, float(amount), entry.get("category_id"))
 
     delete_entry(entry["id"], user_row["id"])
     daily = get_daily_total(user_row["id"])
@@ -62,7 +59,7 @@ async def redo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Please run /start first.")
         return
 
-    redo_data = context.user_data.pop("_redo", None)
+    redo_data = pop_redo_state(user_row["id"])
     if not redo_data:
         await update.message.reply_text("Nothing to redo — only works right after /undo.")
         return
@@ -70,14 +67,14 @@ async def redo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     restore_expense_entry(
         user_row["id"],
         redo_data["raw"],
-        redo_data["total_amount"],
-        redo_data["category_id"],
+        float(redo_data["total_amount"]),
+        redo_data.get("category_id"),
     )
     daily    = get_daily_total(user_row["id"])
     currency = user_row["currency"]
 
     await update.message.reply_text(
-        f"Restored: {fmt(redo_data['total_amount'], currency)}"
+        f"Restored: {fmt(float(redo_data['total_amount']), currency)}"
         + (f'  ("{redo_data["raw"]}")' if redo_data.get("raw") else "")
         + f"\nToday so far: {fmt(daily, currency)}"
     )

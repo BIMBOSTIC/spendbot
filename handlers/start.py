@@ -17,13 +17,18 @@ ASK_CURRENCY = 0
 DEFAULT_CATEGORIES = ["FOOD", "TRANSPORT", "BILLS", "CLOTH", "GAVE", "BORROW", "OTHERS"]
 
 CURRENCY_OPTIONS = [
-    ("TRY (Turkish Lira)", "TRY"),
-    ("USD (US Dollar)",    "USD"),
-    ("EUR (Euro)",         "EUR"),
-    ("GBP (British Pound)","GBP"),
+    ("NGN (Nigerian Naira)",  "NGN"),
+    ("USD (US Dollar)",       "USD"),
+    ("GBP (British Pound)",   "GBP"),
+    ("EUR (Euro)",            "EUR"),
+    ("GHS (Ghanaian Cedi)",   "GHS"),
+    ("KES (Kenyan Shilling)", "KES"),
+    ("ZAR (South African Rand)", "ZAR"),
+    ("TRY (Turkish Lira)",    "TRY"),
 ]
 
-CURRENCY_SYMBOLS = {"TRY": "₺", "USD": "$", "EUR": "€", "GBP": "£"}
+# Import from utils to keep symbols in one place
+from utils import CURRENCY_SYMBOLS
 
 WELCOME_TEXT = (
     "Welcome to Daily Spend!\n\n"

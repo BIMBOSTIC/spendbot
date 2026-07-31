@@ -1,4 +1,19 @@
-CURRENCY_SYMBOLS = {"TRY": "₺", "USD": "$", "EUR": "€", "GBP": "£"}
+CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "TRY": "₺",
+    "NGN": "₦",
+    "GHS": "₵",
+    "KES": "KSh",
+    "ZAR": "R",
+    "INR": "₹",
+    "JPY": "¥",
+    "CNY": "¥",
+    "CAD": "CA$",
+    "AUD": "A$",
+    "AED": "د.إ",
+}
 
 
 def fmt(amount: float, currency: str) -> str:

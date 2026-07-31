@@ -323,6 +323,26 @@ def get_summary(user_id: str, start: str, end: str, category: str | None = None)
     }
 
 
+# ── Redo state (DB-backed so it survives bot restarts) ───────────────────────
+
+def save_redo_state(user_id: str, raw: str, total_amount: float, category_id: str | None) -> None:
+    get_db().table("redo_state").upsert({
+        "user_id":      user_id,
+        "raw":          raw,
+        "total_amount": total_amount,
+        "category_id":  category_id,
+    }).execute()
+
+
+def pop_redo_state(user_id: str) -> dict | None:
+    r = get_db().table("redo_state").select("*").eq("user_id", user_id).execute()
+    if not r.data:
+        return None
+    row = r.data[0]
+    get_db().table("redo_state").delete().eq("user_id", user_id).execute()
+    return row
+
+
 # ── Digest settings ──────────────────────────────────────────────────────────
 
 def update_digest_setting(user_id: str, enabled: bool) -> None:
