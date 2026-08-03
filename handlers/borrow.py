@@ -29,8 +29,11 @@ async def borrow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     amount, counterparty = _parse_amount_and_party(context.args or [], "from")
-    if not amount or not counterparty:
+    if not amount:
         await update.message.reply_text("Usage: /borrow 2000 from mum")
+        return
+    if not counterparty:
+        await update.message.reply_text(f"Include a name — e.g. borrow {int(amount)} from mum")
         return
 
     await _log_and_confirm(update.message.reply_text, user_row, counterparty, amount, "borrowed")
@@ -43,8 +46,11 @@ async def repaid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     amount, counterparty = _parse_amount_and_party(context.args or [], "to")
-    if not amount or not counterparty:
-        await update.message.reply_text("Usage: /repaid 500 to mum")
+    if not amount:
+        await update.message.reply_text("Usage: /repaid 4000 to mum")
+        return
+    if not counterparty:
+        await update.message.reply_text(f"Include a name — e.g. repaid {int(amount)} to mum")
         return
 
     await _log_and_confirm(update.message.reply_text, user_row, counterparty, amount, "repaid")
@@ -61,13 +67,17 @@ async def handle_borrow_text(reply_fn, user_row: dict, parsed: dict) -> None:
         from handlers.lend import handle_lend_text
         await handle_lend_text(reply_fn, user_row, parsed)
         return
-    await _log_and_confirm(
-        reply_fn,
-        user_row,
-        borrow_data["counterparty"],
-        borrow_data["amount"],
-        direction,
-    )
+
+    counterparty = borrow_data.get("counterparty")
+    amount       = borrow_data.get("amount", 0)
+    if not counterparty:
+        if direction == "repaid":
+            await reply_fn(f"Include a name — e.g. repaid {int(amount)} to mum")
+        else:
+            await reply_fn(f"Include a name — e.g. borrow {int(amount)} from mum")
+        return
+
+    await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction)
 
 
 async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: float, direction: str) -> None:

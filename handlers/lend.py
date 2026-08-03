@@ -93,7 +93,17 @@ async def handle_lend_text(reply_fn, user_row: dict, parsed: dict) -> None:
     direction = borrow_data.get("direction", "lent")
     if direction == "collected":
         direction = "lent_repaid"
-    await _log_and_confirm(reply_fn, user_row, borrow_data["counterparty"], borrow_data["amount"], direction)
+
+    counterparty = borrow_data.get("counterparty")
+    amount       = borrow_data.get("amount", 0)
+    if not counterparty:
+        if direction == "lent_repaid":
+            await reply_fn(f"Include a name — e.g. lend repaid {int(amount)} from pedro")
+        else:
+            await reply_fn(f"Include a name — e.g. lend {int(amount)} to pedro")
+        return
+
+    await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction)
 
 
 async def send_lend_balances(reply_fn, user_row: dict) -> None:

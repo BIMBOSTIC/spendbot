@@ -23,6 +23,26 @@ def get_category_id(user_id: str, name: str) -> str | None:
     return r.data[0]["id"] if r.data else None
 
 
+def get_or_create_category(user_id: str, name: str) -> str:
+    db = get_db()
+    name_upper = name.strip().upper()
+    r = (
+        db.table("categories")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("name", name_upper)
+        .execute()
+    )
+    if r.data:
+        return r.data[0]["id"]
+    ins = db.table("categories").insert({
+        "user_id": user_id,
+        "name": name_upper,
+        "is_default": False,
+    }).execute()
+    return ins.data[0]["id"]
+
+
 # ── Items ─────────────────────────────────────────────────────────────────────
 
 def get_or_create_item(user_id: str, canonical_name: str, category_id: str | None) -> str:

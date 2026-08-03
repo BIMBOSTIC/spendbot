@@ -2,7 +2,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db.queries import (
-    get_user, get_category_id, create_expense, create_gave,
+    get_user, get_category_id, get_or_create_category, create_expense, create_gave,
     get_daily_total, get_gave_total_ytd,
 )
 from llm_parser import parse_message
@@ -10,7 +10,8 @@ from utils import fmt
 
 logger = logging.getLogger(__name__)
 
-PENDING_KEY = "pending_expense"
+PENDING_KEY    = "pending_expense"
+CUSTOM_CAT_KEY = "awaiting_custom_cat"
 
 CATEGORY_KEYBOARD = InlineKeyboardMarkup([
     [
@@ -21,7 +22,10 @@ CATEGORY_KEYBOARD = InlineKeyboardMarkup([
         InlineKeyboardButton("BILLS",     callback_data="cat_pick:BILLS"),
         InlineKeyboardButton("CLOTH",     callback_data="cat_pick:CLOTH"),
     ],
-    [InlineKeyboardButton("OTHERS",       callback_data="cat_pick:OTHERS")],
+    [
+        InlineKeyboardButton("OTHERS",    callback_data="cat_pick:OTHERS"),
+        InlineKeyboardButton("Custom...", callback_data="cat_pick:CUSTOM"),
+    ],
 ])
 
 # Only auto-save for these clearly unambiguous categories; ask for everything else
@@ -41,6 +45,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     text       = update.message.text.strip()
     text_lower = text.lower()
+
+    # ── Custom category awaiting input ────────────────────────────────────────
+    if context.user_data.get(CUSTOM_CAT_KEY):
+        pending = context.user_data.pop(PENDING_KEY, None)
+        context.user_data.pop(CUSTOM_CAT_KEY)
+        if not pending:
+            await update.message.reply_text("Session expired — please retype your expense.")
+            return
+        cat_name = text.strip().upper()
+        cat_id   = get_or_create_category(user_row["id"], cat_name)
+        await _save_and_confirm(update.message.reply_text, user_row, pending["raw"], pending["parsed"], cat_name, cat_id)
+        return
 
     # ── Plain-text command aliases ────────────────────────────────────────────
 
@@ -342,7 +358,19 @@ async def handle_category_pick(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     cat_name = query.data.split(":")[1]
-    pending  = context.user_data.pop(PENDING_KEY, None)
+
+    if cat_name == "CUSTOM":
+        if not context.user_data.get(PENDING_KEY):
+            await query.edit_message_text("Session expired — please retype your expense.")
+            return
+        context.user_data[CUSTOM_CAT_KEY] = True
+        await query.edit_message_text(
+            "What category should I log this under?\n"
+            "Type a name (e.g. HEALTH, FUEL, GYM):"
+        )
+        return
+
+    pending = context.user_data.pop(PENDING_KEY, None)
     if not pending:
         await query.edit_message_text("Session expired — please retype your expense.")
         return
