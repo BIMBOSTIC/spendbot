@@ -24,6 +24,7 @@ from handlers.savings import build_saving_handler, saved_command, savings_comman
 from handlers.lend import lend
 from handlers.admin import admin
 from rate_limit import is_allowed, should_warn
+import sentry_setup
 
 logging.basicConfig(
     format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
@@ -79,12 +80,19 @@ async def help_command(update: Update, _) -> None:
 
 
 async def error_handler(update: object, context) -> None:
-    logger.exception("Unhandled error: %s", context.error)
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("Something went wrong — please try again.")
+    uid = None
+    if isinstance(update, Update) and update.effective_user:
+        uid = update.effective_user.id
+
+    logger.exception("Unhandled error (user=%s): %s", uid, type(context.error).__name__)
+    sentry_setup.capture(context.error, user_id=uid)
+
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text("Something went wrong — please try again.")
 
 
 def main() -> None:
+    sentry_setup.init()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Rate limiter runs first, before any other handler

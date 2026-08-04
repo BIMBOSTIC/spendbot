@@ -1,6 +1,7 @@
 import re
 import logging
 from datetime import date, timedelta
+import sentry_setup
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ContextTypes,
@@ -356,33 +357,35 @@ async def send_daily_wallet_reports(context) -> None:
             by_user.setdefault(int(tg_id), []).append(w)
 
     for tg_id, user_wallets in by_user.items():
-        report_blocks = []
-        for w in user_wallets:
-            await sync_wallet(w)
-            stats      = get_wallet_stats(w["id"], start, end)
-            chain      = w.get("chain", "SOL")
-            label      = w.get("label") or f"{chain} {_short(w['address'])}"
+        try:
+            report_blocks = []
+            for w in user_wallets:
+                await sync_wallet(w)
+                stats  = get_wallet_stats(w["id"], start, end)
+                chain  = w.get("chain", "SOL")
+                label  = w.get("label") or f"{chain} {_short(w['address'])}"
 
-            if stats["total"] == 0:
-                continue
+                if stats["total"] == 0:
+                    continue
 
-            result_line = ""
-            if stats["has_pnl_data"]:
-                outcome     = "profit" if stats["total_pnl"] >= 0 else "loss"
-                result_line = f"\nP&L: {_fmt_pnl(stats['total_pnl'])} ({outcome})"
+                result_line = ""
+                if stats["has_pnl_data"]:
+                    outcome     = "profit" if stats["total_pnl"] >= 0 else "loss"
+                    result_line = f"\nP&L: {_fmt_pnl(stats['total_pnl'])} ({outcome})"
 
-            report_blocks.append(
-                f"{label}\n"
-                f"{stats['total']} trades — {stats['wins']} wins / {stats['losses']} losses"
-                + result_line
-            )
+                report_blocks.append(
+                    f"{label}\n"
+                    f"{stats['total']} trades — {stats['wins']} wins / {stats['losses']} losses"
+                    + result_line
+                )
 
-        if report_blocks:
-            msg = f"Daily wallet report — {today}\n\n" + "\n\n".join(report_blocks)
-            try:
+            if report_blocks:
+                msg = f"Daily wallet report — {today}\n\n" + "\n\n".join(report_blocks)
                 await context.bot.send_message(chat_id=tg_id, text=msg)
-            except Exception as e:
-                logger.warning("Could not send wallet report to %s: %s", tg_id, e)
+
+        except Exception as exc:
+            logger.exception("Daily wallet report failed for tg_id %s", tg_id)
+            sentry_setup.capture(exc, user_id=tg_id, tag="daily_wallet_report")
 
 
 # ── ConversationHandler builder ───────────────────────────────────────────────

@@ -2,6 +2,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import get_user, update_digest_setting, get_digest_users
+import sentry_setup
 
 logger = logging.getLogger(__name__)
 
@@ -43,5 +44,6 @@ async def send_weekly_digests(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         try:
             await send_summary(reply_fn, user_row, "week")
-        except Exception:
+        except Exception as exc:
             logger.exception("Weekly digest failed for user %s", user_row.get("id"))
+            sentry_setup.capture(exc, user_id=user_row.get("id"), tag="weekly_digest")

@@ -10,3 +10,4 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 HELIUS_API_KEY     = os.environ.get("HELIUS_API_KEY", "")
 MORALIS_API_KEY    = os.environ.get("MORALIS_API_KEY", "")
 ADMIN_TELEGRAM_ID  = int(os.environ.get("ADMIN_TELEGRAM_ID", "0"))
+SENTRY_DSN         = os.environ.get("SENTRY_DSN", "")
