@@ -401,7 +401,7 @@ def get_admin_stats(today: str) -> dict:
     try:
         pf = (
             db.table("parse_failures")
-            .select("id")
+            .select("id, error_reason")
             .gte("created_at", start)
             .lte("created_at", end)
             .execute()
@@ -418,11 +418,12 @@ def get_admin_stats(today: str) -> dict:
     }
 
 
-def log_parse_failure(user_id: str | None, raw: str) -> None:
+def log_parse_failure(user_id: str | None, raw: str, error_reason: str = "") -> None:
     try:
         get_db().table("parse_failures").insert({
-            "user_id": user_id,
-            "raw":     raw[:500],
+            "user_id":      user_id,
+            "raw_message":  raw[:500],
+            "error_reason": error_reason[:200],
         }).execute()
     except Exception:
         pass

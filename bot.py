@@ -3,7 +3,9 @@ import logging
 from telegram import Update
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     CommandHandler,
+    ContextTypes,
     MessageHandler,
     CallbackQueryHandler,
     filters,
@@ -21,6 +23,7 @@ from handlers.wallet import build_wallet_handler, winrate_command, trades_comman
 from handlers.savings import build_saving_handler, saved_command, savings_command
 from handlers.lend import lend
 from handlers.admin import admin
+from rate_limit import is_allowed, should_warn
 
 logging.basicConfig(
     format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
@@ -59,6 +62,18 @@ HELP_TEXT = (
 )
 
 
+async def _rate_limit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not user:
+        return
+    if not is_allowed(user.id):
+        if should_warn(user.id):
+            msg = update.effective_message
+            if msg:
+                await msg.reply_text("You're sending messages too fast, try again in a moment")
+        raise ApplicationHandlerStop
+
+
 async def help_command(update: Update, _) -> None:
     await update.message.reply_text(HELP_TEXT)
 
@@ -71,6 +86,9 @@ async def error_handler(update: object, context) -> None:
 
 def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Rate limiter runs first, before any other handler
+    app.add_handler(MessageHandler(filters.ALL, _rate_limit), group=-1)
 
     # ConversationHandlers must be registered before catch-all handlers
     app.add_handler(start_conv())

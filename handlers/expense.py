@@ -165,9 +165,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     try:
         parsed = await parse_message(text)
-    except Exception:
+    except Exception as exc:
         logger.exception("Parser failed for input: %s", text)
-        log_parse_failure(user_row["id"], text)
+        log_parse_failure(user_row["id"], text, error_reason=f"parser_exception: {exc}")
         await update.message.reply_text(
             "Couldn't read that. Try:\n"
             "• Expense: bread 100  or  haircut 300\n"
@@ -189,6 +189,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif intent == "query":
         await _handle_query(update, user_row, parsed)
     else:
+        log_parse_failure(user_row["id"], text, error_reason=f"unknown_intent: {intent!r}")
         await _handle_unknown(update, parsed)
 
 
