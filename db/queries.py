@@ -363,6 +363,71 @@ def pop_redo_state(user_id: str) -> dict | None:
     return row
 
 
+# ── Admin stats ──────────────────────────────────────────────────────────────
+
+def get_admin_stats(today: str) -> dict:
+    db    = get_db()
+    start = f"{today}T00:00:00"
+    end   = f"{today}T23:59:59"
+
+    entries = (
+        db.table("expense_entries")
+        .select("id, user_id")
+        .gte("created_at", start)
+        .lte("created_at", end)
+        .execute()
+    ).data
+
+    active_users   = len({r["user_id"] for r in entries})
+    total_messages = len(entries)
+
+    top_items: list[tuple[str, int]] = []
+    if entries:
+        entry_ids = [r["id"] for r in entries]
+        li = (
+            db.table("line_items")
+            .select("items(canonical_name)")
+            .in_("expense_entry_id", entry_ids)
+            .execute()
+        ).data
+        counts: dict[str, int] = {}
+        for row in li:
+            name = (row.get("items") or {}).get("canonical_name")
+            if name:
+                counts[name] = counts.get(name, 0) + 1
+        top_items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    parse_failures = 0
+    try:
+        pf = (
+            db.table("parse_failures")
+            .select("id")
+            .gte("created_at", start)
+            .lte("created_at", end)
+            .execute()
+        )
+        parse_failures = len(pf.data)
+    except Exception:
+        pass
+
+    return {
+        "active_users":   active_users,
+        "total_messages": total_messages,
+        "parse_failures": parse_failures,
+        "top_items":      top_items,
+    }
+
+
+def log_parse_failure(user_id: str | None, raw: str) -> None:
+    try:
+        get_db().table("parse_failures").insert({
+            "user_id": user_id,
+            "raw":     raw[:500],
+        }).execute()
+    except Exception:
+        pass
+
+
 # ── Digest settings ──────────────────────────────────────────────────────────
 
 def update_digest_setting(user_id: str, enabled: bool) -> None:

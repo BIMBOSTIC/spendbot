@@ -20,6 +20,7 @@ from handlers.digest import digest_command, send_weekly_digests
 from handlers.wallet import build_wallet_handler, winrate_command, trades_command, send_daily_wallet_reports
 from handlers.savings import build_saving_handler, saved_command, savings_command
 from handlers.lend import lend
+from handlers.admin import admin
 
 logging.basicConfig(
     format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
@@ -92,6 +93,7 @@ def main() -> None:
     app.add_handler(CommandHandler("saved",    saved_command))
     app.add_handler(CommandHandler("savings",  savings_command))
     app.add_handler(CommandHandler("help",     help_command))
+    app.add_handler(CommandHandler("admin",    admin))
 
     app.add_handler(CallbackQueryHandler(handle_category_pick, pattern=r"^cat_pick:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db.queries import (
     get_user, get_category_id, get_or_create_category, create_expense, create_gave,
-    get_daily_total, get_gave_total_ytd,
+    get_daily_total, get_gave_total_ytd, log_parse_failure,
 )
 from llm_parser import parse_message
 from utils import fmt
@@ -167,6 +167,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parsed = await parse_message(text)
     except Exception:
         logger.exception("Parser failed for input: %s", text)
+        log_parse_failure(user_row["id"], text)
         await update.message.reply_text(
             "Couldn't read that. Try:\n"
             "• Expense: bread 100  or  haircut 300\n"
