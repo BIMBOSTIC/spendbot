@@ -35,20 +35,26 @@ async def lend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if args[0].lower() in ("repaid", "collected"):
         amount, counterparty = _parse_amount_and_party(args[1:], "from")
-        if not amount or not counterparty:
+        if not amount:
             await update.message.reply_text("Usage: /lend repaid 500 from pedro")
+            return
+        if not counterparty:
+            await update.message.reply_text(f"Include a name — e.g. lend repaid {int(amount)} from pedro")
             return
         await _log_and_confirm(update.message.reply_text, user_row, counterparty, amount, "lent_repaid")
         return
 
     amount, counterparty = _parse_amount_and_party(args, "to")
-    if not amount or not counterparty:
+    if not amount:
         await update.message.reply_text(
             "Usage:\n"
             "/lend 500 to pedro — you lent money\n"
             "/lend repaid 500 from pedro — they paid you back\n"
             "/lend balances — who owes you"
         )
+        return
+    if not counterparty:
+        await update.message.reply_text(f"Include a name — e.g. lend {int(amount)} to pedro")
         return
 
     await _log_and_confirm(update.message.reply_text, user_row, counterparty, amount, "lent")

@@ -48,13 +48,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     # ── Custom category awaiting input ────────────────────────────────────────
     if context.user_data.get(CUSTOM_CAT_KEY):
+        cat_name = text.strip().upper()
+        if not cat_name:
+            await update.message.reply_text("Category name can't be empty — type a name (e.g. HEALTH, FUEL):")
+            return  # leave flags intact so next message is still intercepted
         pending = context.user_data.pop(PENDING_KEY, None)
         context.user_data.pop(CUSTOM_CAT_KEY)
         if not pending:
             await update.message.reply_text("Session expired — please retype your expense.")
             return
-        cat_name = text.strip().upper()
-        cat_id   = get_or_create_category(user_row["id"], cat_name)
+        cat_id = get_or_create_category(user_row["id"], cat_name)
         await _save_and_confirm(update.message.reply_text, user_row, pending["raw"], pending["parsed"], cat_name, cat_id)
         return
 
