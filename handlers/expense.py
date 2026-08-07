@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 PENDING_KEY    = "pending_expense"
 CUSTOM_CAT_KEY = "awaiting_custom_cat"
 
+_VALID_CAT_PICKS = {"FOOD", "TRANSPORT", "BILLS", "CLOTH", "OTHERS", "CUSTOM"}
+
 CATEGORY_KEYBOARD = InlineKeyboardMarkup([
     [
         InlineKeyboardButton("FOOD",      callback_data="cat_pick:FOOD"),
@@ -362,7 +364,10 @@ async def handle_category_pick(update: Update, context: ContextTypes.DEFAULT_TYP
     if not user_row:
         return
 
-    cat_name = query.data.split(":")[1]
+    parts = query.data.split(":", 1)
+    cat_name = parts[1].upper() if len(parts) > 1 else ""
+    if cat_name not in _VALID_CAT_PICKS:
+        return
 
     if cat_name == "CUSTOM":
         if not context.user_data.get(PENDING_KEY):

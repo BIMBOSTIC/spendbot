@@ -484,6 +484,69 @@ def search_items(user_id: str, query: str) -> list[str]:
     return [row["canonical_name"] for row in r.data]
 
 
+def search_items_by_prefix(user_id: str, query: str) -> list[str]:
+    r = (
+        get_db().table("items")
+        .select("canonical_name")
+        .eq("user_id", user_id)
+        .ilike("canonical_name", f"{query.lower()}%")
+        .execute()
+    )
+    return [row["canonical_name"] for row in r.data]
+
+
+def get_item_summary_by_prefix(user_id: str, prefix: str, start: str, end: str) -> dict:
+    """Aggregate line_items for all items whose canonical_name starts with prefix."""
+    db = get_db()
+    items_r = (
+        db.table("items")
+        .select("id, canonical_name")
+        .eq("user_id", user_id)
+        .ilike("canonical_name", f"{prefix.lower()}%")
+        .execute()
+    )
+    if not items_r.data:
+        return {"total": 0.0, "variants": []}
+
+    item_map = {item["id"]: item["canonical_name"] for item in items_r.data}
+
+    entries_r = (
+        db.table("expense_entries")
+        .select("id")
+        .eq("user_id", user_id)
+        .gte("created_at", start)
+        .lte("created_at", end)
+        .execute()
+    )
+    if not entries_r.data:
+        return {"total": 0.0, "variants": []}
+
+    entry_ids = [e["id"] for e in entries_r.data]
+    li_r = (
+        db.table("line_items")
+        .select("item_id, amount")
+        .in_("expense_entry_id", entry_ids)
+        .in_("item_id", list(item_map.keys()))
+        .execute()
+    )
+
+    by_variant: dict[str, float] = {}
+    total = 0.0
+    for row in li_r.data:
+        name = item_map[row["item_id"]]
+        amt = float(row["amount"])
+        by_variant[name] = by_variant.get(name, 0.0) + amt
+        total += amt
+
+    return {
+        "total": total,
+        "variants": sorted(
+            [{"name": k, "total": v} for k, v in by_variant.items()],
+            key=lambda x: x["total"], reverse=True,
+        ),
+    }
+
+
 def get_price_change_leaders(user_id: str, top_n: int = 5) -> list[dict]:
     db = get_db()
     items_r = (

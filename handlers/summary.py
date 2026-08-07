@@ -4,7 +4,7 @@ import re
 from datetime import date, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
-from db.queries import get_user, get_summary
+from db.queries import get_user, get_summary, get_item_summary_by_prefix
 from utils import fmt
 
 logger = logging.getLogger(__name__)
@@ -12,6 +12,17 @@ logger = logging.getLogger(__name__)
 _RANGE_RE = re.compile(r'(?:from\s+)?(.+?)\s+to\s+(.+)', re.IGNORECASE)
 
 KNOWN_CATEGORIES = {"FOOD", "TRANSPORT", "BILLS", "CLOTH", "GAVE", "BORROW", "OTHERS"}
+
+_DATE_KEYWORDS = {
+    "today", "yesterday", "week", "month", "year",
+    "last", "this", "previous", "prev", "current",
+    "from", "to", "and",
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+    "january", "february", "march", "april",
+    "june", "july", "august", "september",
+    "october", "november", "december",
+}
 
 _MONTH_MAP: dict[str, int] = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -124,9 +135,29 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
 
 
 async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str | None = None) -> None:
+    item_prefix = None
+    resolved = None
+
     try:
-        start, end, label = _resolve_period(period_arg)
+        resolved = _resolve_period(period_arg)
     except ValueError:
+        pass
+
+    if resolved is None:
+        # Try extracting an item name from the period string — e.g. "breadaz week"
+        words = period_arg.lower().split()
+        for i, w in enumerate(words):
+            if w in _DATE_KEYWORDS or not w or w[0].isdigit():
+                continue
+            rest = " ".join(words[:i] + words[i + 1:]).strip() or "today"
+            try:
+                resolved = _resolve_period(rest)
+                item_prefix = w
+                break
+            except ValueError:
+                continue
+
+    if resolved is None:
         await reply_fn(
             "Couldn't understand that date.\n"
             "Try: today · yesterday · week · last week · month · last month · year\n"
@@ -134,8 +165,28 @@ async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str 
         )
         return
 
-    data     = get_summary(user_row["id"], start, end, category=category)
+    start, end, label = resolved
     currency = user_row["currency"]
+
+    if item_prefix:
+        data = get_item_summary_by_prefix(user_row["id"], item_prefix, start, end)
+        header = label + f" · '{item_prefix}'"
+
+        if data["total"] == 0:
+            await reply_fn(f"No expenses for '{item_prefix}' in {label.lower()}.")
+            return
+
+        lines = [f"{header} — {fmt(data['total'], currency)}\n"]
+        for v in data["variants"]:
+            pct = (v["total"] / data["total"]) * 100 if data["total"] > 0 else 0
+            lines.append(f"  {v['name']:<14} {fmt(v['total'], currency):>10}  ({pct:.0f}%)")
+        if len(data["variants"]) > 1:
+            lines.append(f"\nFor price history on a specific variant: /trends <name>")
+
+        await reply_fn("\n".join(lines))
+        return
+
+    data     = get_summary(user_row["id"], start, end, category=category)
     header   = label + (f" · {category.title()}" if category else "")
 
     if data["total"] == 0:

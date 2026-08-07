@@ -5,7 +5,8 @@ import httpx
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import (
-    get_user, get_item_price_history, search_items, get_price_change_leaders,
+    get_user, get_item_price_history, search_items, search_items_by_prefix,
+    get_price_change_leaders,
 )
 from utils import fmt
 
@@ -30,20 +31,42 @@ async def _send_item_trend(reply_fn, reply_photo_fn, user_row: dict, query: str)
     history = get_item_price_history(user_row["id"], query)
 
     if not history:
-        matches = search_items(user_row["id"], query)
-        if not matches:
-            await reply_fn(
-                f"No price history for '{query}'.\n"
-                "Log it a few times first."
-            )
+        # Try prefix match first — these are the same-root variants (breadaz, breadroll)
+        prefix_matches = search_items_by_prefix(user_row["id"], query)
+        if prefix_matches and len(prefix_matches) > 1:
+            currency = user_row["currency"]
+            lines = [f"Variants for '{query}':\n"]
+            for m in prefix_matches[:8]:
+                hist = get_item_price_history(user_row["id"], m)
+                if hist:
+                    latest = hist[-1]
+                    lines.append(f"  • {m}: latest {fmt(latest['amount'], currency)} on {latest['date']}")
+                else:
+                    lines.append(f"  • {m}")
+            lines.append(f"\nFor a price chart: /trends <exact-name>")
+            lines.append(f"For total spent: /summary {query}")
+            await reply_fn("\n".join(lines))
             return
-        if len(matches) == 1:
-            history = get_item_price_history(user_row["id"], matches[0])
-            query = matches[0]
+        elif prefix_matches:
+            # Single prefix match — use it
+            history = get_item_price_history(user_row["id"], prefix_matches[0])
+            query = prefix_matches[0]
         else:
-            opts = "\n".join(f"• {m}" for m in matches[:5])
-            await reply_fn(f"Multiple matches for '{query}':\n{opts}\n\nBe more specific.")
-            return
+            # Fall back to contains search for discoverability
+            matches = search_items(user_row["id"], query)
+            if not matches:
+                await reply_fn(
+                    f"No price history for '{query}'.\n"
+                    "Log it a few times first."
+                )
+                return
+            if len(matches) == 1:
+                history = get_item_price_history(user_row["id"], matches[0])
+                query = matches[0]
+            else:
+                opts = "\n".join(f"• {m}" for m in matches[:5])
+                await reply_fn(f"Multiple items containing '{query}':\n{opts}\n\nBe more specific.")
+                return
 
     currency = user_row["currency"]
 

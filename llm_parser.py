@@ -24,7 +24,7 @@ Borrow direction rules:
   lent         — you gave money TO someone expecting it back ("lent pedro 500", "gave mum a loan")
   lent_repaid  — someone paid you back ("pedro repaid me 500", "collected 300 from ali")
 
-Item name normalisation: shorten to the canonical noun ("loaf of bread" → "bread", "taxi ride" → "taxi").
+Item name normalisation: shorten verbose natural-language descriptions to the canonical noun ("loaf of bread" → "bread", "taxi ride" → "taxi"). Do NOT alter names that already contain a user-specific variant code — alphanumeric suffixes, size markers, or brand codes must be preserved exactly ("breadaz" → "breadaz", "water1.5l" → "water1.5l", "water20l" → "water20l", "sourdough3" → "sourdough3").
 
 Category guessing:
   FOOD      — food, drinks, groceries, restaurants, coffee, snacks
