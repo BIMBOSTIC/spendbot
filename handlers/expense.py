@@ -261,15 +261,17 @@ async def _handle_gave(update, user_row, raw, parsed):
         )
         return
 
-    cat_id    = get_category_id(user_row["id"], "GAVE")
-    create_gave(user_row["id"], raw, parsed, cat_id)
+    entry_date = parsed.get("entry_date") or None
+    cat_id     = get_category_id(user_row["id"], "GAVE")
+    create_gave(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
 
     currency  = user_row["currency"]
     recipient = gave["recipient"].title()
     ytd       = get_gave_total_ytd(user_row["id"], gave["recipient"])
+    date_note = f" (logged for {entry_date})" if entry_date else ""
 
     await update.message.reply_text(
-        f"Logged {fmt(gave['amount'], currency)} to {recipient} under GAVE\n"
+        f"Logged {fmt(gave['amount'], currency)} to {recipient} under GAVE{date_note}\n"
         f"You've given {recipient} {fmt(ytd, currency)} total this year."
     )
 

@@ -77,15 +77,17 @@ async def handle_borrow_text(reply_fn, user_row: dict, parsed: dict) -> None:
             await reply_fn(f"Include a name — e.g. borrow {int(amount)} from mum")
         return
 
-    await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction)
+    entry_date = parsed.get("entry_date") or None
+    await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction, entry_date=entry_date)
 
 
-async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: float, direction: str) -> None:
-    create_borrow_entry(user_row["id"], counterparty, amount, direction)
+async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: float, direction: str, entry_date: str | None = None) -> None:
+    create_borrow_entry(user_row["id"], counterparty, amount, direction, entry_date=entry_date)
 
     all_balances = get_borrow_balances(user_row["id"])
-    currency = user_row["currency"]
-    name = counterparty.title()
+    currency  = user_row["currency"]
+    name      = counterparty.title()
+    date_note = f" (logged for {entry_date})" if entry_date else ""
 
     balance_row = next(
         (b for b in all_balances if b["counterparty"].lower() == counterparty.lower().strip()),
@@ -95,18 +97,18 @@ async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: 
 
     if direction == "borrowed":
         msg = (
-            f"Noted — you owe {name} {fmt(amount, currency)}\n"
+            f"Noted — you owe {name} {fmt(amount, currency)}{date_note}\n"
             f"Total owed to {name}: {fmt(balance, currency)}\n"
             f"Use /repaid {int(amount)} to {counterparty.lower()} when you pay some back."
         )
     else:
         if balance > 0:
             msg = (
-                f"Logged {fmt(amount, currency)} repaid to {name}\n"
+                f"Logged {fmt(amount, currency)} repaid to {name}{date_note}\n"
                 f"Remaining balance with {name}: {fmt(balance, currency)}"
             )
         else:
-            msg = f"Logged {fmt(amount, currency)} repaid to {name}\nYou're all settled with {name}!"
+            msg = f"Logged {fmt(amount, currency)} repaid to {name}{date_note}\nYou're all settled with {name}!"
 
     await reply_fn(msg)
 

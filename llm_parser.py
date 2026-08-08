@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import date as _date
 from anthropic import AsyncAnthropic
 from config import ANTHROPIC_API_KEY
 
@@ -57,6 +58,7 @@ Return this exact JSON schema (null for unused fields):
 
 
 async def parse_message(text: str) -> dict:
+    today_str = _date.today().isoformat()
     response = await _client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
@@ -65,7 +67,7 @@ async def parse_message(text: str) -> dict:
             "text": SYSTEM,
             "cache_control": {"type": "ephemeral"},
         }],
-        messages=[{"role": "user", "content": text}],
+        messages=[{"role": "user", "content": f"[Today: {today_str}] {text}"}],
     )
     raw = response.content[0].text.strip() if response.content else ""
     if not raw:

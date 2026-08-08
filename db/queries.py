@@ -75,7 +75,7 @@ def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None
         "total_amount": parsed["total_amount"],
     }
     if entry_date:
-        row["created_at"] = f"{entry_date}T12:00:00+00:00"
+        row["created_at"] = f"{entry_date}T12:00:00"
 
     entry = db.table("expense_entries").insert(row).execute().data[0]
 
@@ -87,7 +87,7 @@ def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None
             "amount": item["amount"],
         }
         if entry_date:
-            li_row["created_at"] = f"{entry_date}T12:00:00+00:00"
+            li_row["created_at"] = f"{entry_date}T12:00:00"
         db.table("line_items").insert(li_row).execute()
 
     return entry
@@ -139,15 +139,18 @@ def get_daily_total(user_id: str) -> float:
 
 # ── Gave entries ──────────────────────────────────────────────────────────────
 
-def create_gave(user_id: str, raw: str, parsed: dict, category_id: str | None) -> dict:
+def create_gave(user_id: str, raw: str, parsed: dict, category_id: str | None, entry_date: str | None = None) -> dict:
     db = get_db()
     gave = parsed["gave"]
-    entry = db.table("expense_entries").insert({
+    row: dict = {
         "user_id": user_id,
         "raw_message": raw,
         "category_id": category_id,
         "total_amount": gave["amount"],
-    }).execute().data[0]
+    }
+    if entry_date:
+        row["created_at"] = f"{entry_date}T12:00:00"
+    entry = db.table("expense_entries").insert(row).execute().data[0]
 
     db.table("gave_entries").insert({
         "expense_entry_id": entry["id"],
@@ -219,14 +222,17 @@ def get_gave_summary(user_id: str) -> list[dict]:
 
 # ── Borrow ledger ─────────────────────────────────────────────────────────────
 
-def create_borrow_entry(user_id: str, counterparty: str, amount: float, direction: str, note: str = "") -> dict:
-    r = get_db().table("borrow_entries").insert({
+def create_borrow_entry(user_id: str, counterparty: str, amount: float, direction: str, note: str = "", entry_date: str | None = None) -> dict:
+    row: dict = {
         "user_id": user_id,
         "counterparty_name": counterparty.lower().strip(),
         "amount": amount,
         "direction": direction,
         "note": note or None,
-    }).execute()
+    }
+    if entry_date:
+        row["created_at"] = f"{entry_date}T12:00:00"
+    r = get_db().table("borrow_entries").insert(row).execute()
     return r.data[0]
 
 
