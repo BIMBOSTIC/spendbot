@@ -182,11 +182,17 @@ async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return AWAIT_ADDRESS
 
 
+_VALID_CHAINS = set(_CHAIN_LABELS.keys())
+
+
 async def chain_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
 
-    chain    = query.data.replace("wchain_", "")
+    chain = query.data.replace("wchain_", "")
+    if chain not in _VALID_CHAINS:
+        await query.edit_message_text("Invalid selection — please try /wallet add again.")
+        return ConversationHandler.END
     label_str = _CHAIN_LABELS.get(chain, chain)
     context.user_data["_pending_chain"] = chain
 

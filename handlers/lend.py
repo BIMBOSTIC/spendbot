@@ -60,12 +60,13 @@ async def lend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _log_and_confirm(update.message.reply_text, user_row, counterparty, amount, "lent")
 
 
-async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: float, direction: str) -> None:
-    create_borrow_entry(user_row["id"], counterparty, amount, direction)
+async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: float, direction: str, entry_date: str | None = None) -> None:
+    create_borrow_entry(user_row["id"], counterparty, amount, direction, entry_date=entry_date)
 
-    balances = get_lend_balances(user_row["id"])
-    currency = user_row["currency"]
-    name = counterparty.title()
+    balances  = get_lend_balances(user_row["id"])
+    currency  = user_row["currency"]
+    name      = counterparty.title()
+    date_note = f" (logged for {entry_date})" if entry_date else ""
 
     balance_row = next(
         (b for b in balances if b["counterparty"].lower() == counterparty.lower().strip()),
@@ -75,18 +76,18 @@ async def _log_and_confirm(reply_fn, user_row: dict, counterparty: str, amount: 
 
     if direction == "lent":
         msg = (
-            f"Noted — {name} owes you {fmt(amount, currency)}\n"
+            f"Noted — {name} owes you {fmt(amount, currency)}{date_note}\n"
             f"Total owed by {name}: {fmt(outstanding, currency)}\n"
             f"Use /lend repaid {int(amount)} from {counterparty.lower()} when they pay back."
         )
     else:
         if outstanding > 0:
             msg = (
-                f"Logged {fmt(amount, currency)} received from {name}\n"
+                f"Logged {fmt(amount, currency)} received from {name}{date_note}\n"
                 f"Remaining: {name} still owes you {fmt(outstanding, currency)}"
             )
         else:
-            msg = f"Logged {fmt(amount, currency)} received from {name}\nAll settled with {name}!"
+            msg = f"Logged {fmt(amount, currency)} received from {name}{date_note}\nAll settled with {name}!"
 
     await reply_fn(msg)
 
@@ -109,7 +110,8 @@ async def handle_lend_text(reply_fn, user_row: dict, parsed: dict) -> None:
             await reply_fn(f"Include a name — e.g. lend {int(amount)} to pedro")
         return
 
-    await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction)
+    entry_date = parsed.get("entry_date") or None
+    await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction, entry_date=entry_date)
 
 
 async def send_lend_balances(reply_fn, user_row: dict) -> None:

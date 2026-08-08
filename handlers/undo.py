@@ -121,7 +121,7 @@ async def edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await query.edit_message_text("Session expired. Please /start again.")
         return ConversationHandler.END
 
-    entry_id = query.data.split(":")[1]
+    entry_id = query.data.split(":", 1)[1]
     raws     = context.user_data.pop("_edit_raws", {})
     raw      = raws.get(entry_id, "")
 

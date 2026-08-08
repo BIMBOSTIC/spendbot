@@ -64,11 +64,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ASK_CURRENCY
 
 
+_VALID_CURRENCIES = {code for _, code in CURRENCY_OPTIONS}
+
+
 async def set_currency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
 
-    currency = query.data.split(":")[1]
+    parts = query.data.split(":", 1)
+    currency = parts[1] if len(parts) > 1 else ""
+    if currency not in _VALID_CURRENCIES:
+        await query.edit_message_text("Invalid selection — please run /start again.")
+        return ConversationHandler.END
     tg_user = query.from_user
     db = get_db()
 

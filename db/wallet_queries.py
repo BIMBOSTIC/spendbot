@@ -52,9 +52,15 @@ def update_last_synced(wallet_id: str) -> None:
 
 
 def upsert_trade(wallet_id: str, trade: dict) -> bool:
-    """Insert a trade if tx_hash not already stored. Returns True if new."""
+    """Insert a trade if tx_hash not already stored for this wallet. Returns True if new."""
     db = get_db()
-    existing = db.table("trades").select("id").eq("tx_hash", trade["tx_hash"]).execute()
+    existing = (
+        db.table("trades")
+        .select("id")
+        .eq("wallet_id", wallet_id)
+        .eq("tx_hash", trade["tx_hash"])
+        .execute()
+    )
     if existing.data:
         return False
     db.table("trades").insert({"wallet_id": wallet_id, **trade}).execute()

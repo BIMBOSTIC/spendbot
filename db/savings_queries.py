@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from db.client import get_db
 
 
@@ -15,7 +15,7 @@ def set_savings_goal(user_id: str, daily_target: float) -> dict:
     if existing:
         r = (
             db.table("savings_goals")
-            .update({"daily_target": daily_target, "updated_at": "now()"})
+            .update({"daily_target": daily_target, "updated_at": datetime.now(timezone.utc).isoformat()})
             .eq("user_id", user_id)
             .execute()
         )
