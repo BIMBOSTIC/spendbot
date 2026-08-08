@@ -39,6 +39,8 @@ Set ambiguous=true ONLY when there is genuinely no reasonable category guess.
 If only one item is in the message, items[] still contains that one item.
 total_amount must equal the sum of all items[].amount values.
 
+Backdating: if the user specifies a past date for the expense ("yesterday", "last monday", "jan 5", "3 days ago"), extract it as entry_date in ISO format (YYYY-MM-DD). Use null when no date is mentioned (default to today).
+
 Return this exact JSON schema (null for unused fields):
 {
   "intent": "expense"|"gave"|"borrow"|"query"|"unknown",
@@ -48,7 +50,8 @@ Return this exact JSON schema (null for unused fields):
   "items": [{"name": "<canonical>", "amount": <number>}],
   "gave": {"recipient": "<name>", "amount": <number>, "note": "<note or empty string>"} | null,
   "borrow": {"counterparty": "<name>", "amount": <number>, "direction": "borrowed"|"repaid"|"lent"|"lent_repaid"} | null,
-  "query_intent": "<plain description of what user is asking>" | null
+  "query_intent": "<plain description of what user is asking>" | null,
+  "entry_date": "YYYY-MM-DD" | null
 }
 """
 

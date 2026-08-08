@@ -275,7 +275,8 @@ async def _handle_gave(update, user_row, raw, parsed):
 
 
 async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
-    create_expense(user_row["id"], raw, parsed, cat_id)
+    entry_date = parsed.get("entry_date") or None
+    create_expense(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
     daily    = get_daily_total(user_row["id"])
     currency = user_row["currency"]
 
@@ -286,8 +287,9 @@ async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
             f"- {it['name']} {fmt(it['amount'], currency)}" for it in items
         )
 
+    date_note = f" (logged for {entry_date})" if entry_date else ""
     await reply_fn(
-        f"Logged under {cat_name} — {fmt(parsed['total_amount'], currency)} total"
+        f"Logged under {cat_name} — {fmt(parsed['total_amount'], currency)} total{date_note}"
         + item_line
         + f"\nToday so far: {fmt(daily, currency)}"
     )

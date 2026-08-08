@@ -66,22 +66,29 @@ def get_or_create_item(user_id: str, canonical_name: str, category_id: str | Non
 
 # ── Expense entries ───────────────────────────────────────────────────────────
 
-def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None) -> dict:
+def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None, entry_date: str | None = None) -> dict:
     db = get_db()
-    entry = db.table("expense_entries").insert({
+    row: dict = {
         "user_id": user_id,
         "raw_message": raw,
         "category_id": category_id,
         "total_amount": parsed["total_amount"],
-    }).execute().data[0]
+    }
+    if entry_date:
+        row["created_at"] = f"{entry_date}T12:00:00+00:00"
+
+    entry = db.table("expense_entries").insert(row).execute().data[0]
 
     for item in parsed.get("items", []):
         item_id = get_or_create_item(user_id, item["name"], category_id)
-        db.table("line_items").insert({
+        li_row: dict = {
             "expense_entry_id": entry["id"],
             "item_id": item_id,
             "amount": item["amount"],
-        }).execute()
+        }
+        if entry_date:
+            li_row["created_at"] = f"{entry_date}T12:00:00+00:00"
+        db.table("line_items").insert(li_row).execute()
 
     return entry
 
