@@ -322,16 +322,38 @@ def get_lend_balances(user_id: str) -> list[dict]:
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 def get_summary(user_id: str, start: str, end: str, category: str | None = None) -> dict:
-    r = (
-        get_db().table("expense_entries")
+    db = get_db()
+    excluded = {"BORROW"}
+
+    # Resolve category name → category_id for a direct DB-level filter
+    category_id: str | None = None
+    if category:
+        cat_upper = category.upper()
+        if cat_upper in excluded:
+            return {"total": 0.0, "by_category": []}
+        cat_r = (
+            db.table("categories")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("name", cat_upper)
+            .execute()
+        )
+        if not cat_r.data:
+            return {"total": 0.0, "by_category": []}
+        category_id = cat_r.data[0]["id"]
+
+    q = (
+        db.table("expense_entries")
         .select("total_amount, categories(name)")
         .eq("user_id", user_id)
         .gte("created_at", start)
         .lte("created_at", end)
-        .execute()
     )
+    if category_id:
+        q = q.eq("category_id", category_id)
 
-    excluded = {"BORROW"}
+    r = q.execute()
+
     total = 0.0
     by_cat: dict[str, float] = {}
 
@@ -339,8 +361,6 @@ def get_summary(user_id: str, start: str, end: str, category: str | None = None)
         cat_row = row.get("categories")
         cat_name = cat_row["name"] if cat_row else "OTHERS"
         if cat_name in excluded:
-            continue
-        if category and cat_name != category.upper():
             continue
         amt = float(row["total_amount"])
         total += amt

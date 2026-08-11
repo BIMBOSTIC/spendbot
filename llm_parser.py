@@ -40,7 +40,9 @@ Set ambiguous=true ONLY when there is genuinely no reasonable category guess.
 If only one item is in the message, items[] still contains that one item.
 total_amount must equal the sum of all items[].amount values.
 
-Backdating: if the user specifies a past date for the expense ("yesterday", "last monday", "jan 5", "3 days ago"), extract it as entry_date in ISO format (YYYY-MM-DD). Use null when no date is mentioned (default to today).
+Date context: the message starts with "[Today: YYYY-MM-DD]" to tell you today's date. Use the date after "Today: " as your reference — do NOT treat this prefix as part of the expense or as an item. Compute absolute ISO dates from relative references ("yesterday" = today minus 1 day, "3 days ago" = today minus 3 days, "last monday" = the most recent Monday before today, etc.).
+
+Backdating: if the user specifies a past date for the expense ("yesterday", "last monday", "jan 5", "3 days ago"), extract it as entry_date in ISO format (YYYY-MM-DD). Use null when no date is mentioned.
 
 Return this exact JSON schema (null for unused fields):
 {
