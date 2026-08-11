@@ -1,8 +1,11 @@
 import logging
+import re
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import get_user, create_borrow_entry, get_borrow_balances
 from utils import fmt
+
+_ISO_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +80,8 @@ async def handle_borrow_text(reply_fn, user_row: dict, parsed: dict) -> None:
             await reply_fn(f"Include a name — e.g. borrow {int(amount)} from mum")
         return
 
-    entry_date = parsed.get("entry_date") or None
+    raw_date   = parsed.get("entry_date") or None
+    entry_date = raw_date if (raw_date and _ISO_DATE_RE.match(str(raw_date))) else None
     await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction, entry_date=entry_date)
 
 

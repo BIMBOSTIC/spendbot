@@ -124,14 +124,14 @@ def delete_entry(entry_id: str, user_id: str) -> None:
     get_db().table("expense_entries").delete().eq("id", entry_id).eq("user_id", user_id).execute()
 
 
-def get_daily_total(user_id: str) -> float:
-    today = date.today().isoformat()
+def get_daily_total(user_id: str, target_date: str | None = None) -> float:
+    d = target_date or date.today().isoformat()
     r = (
         get_db().table("expense_entries")
         .select("total_amount")
         .eq("user_id", user_id)
-        .gte("created_at", f"{today}T00:00:00")
-        .lte("created_at", f"{today}T23:59:59")
+        .gte("created_at", f"{d}T00:00:00")
+        .lte("created_at", f"{d}T23:59:59")
         .execute()
     )
     return float(sum(row["total_amount"] for row in r.data))

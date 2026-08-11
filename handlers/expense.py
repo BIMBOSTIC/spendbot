@@ -1,4 +1,5 @@
 import logging
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db.queries import (
@@ -7,6 +8,8 @@ from db.queries import (
 )
 from llm_parser import parse_message
 from utils import fmt
+
+_ISO_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +264,8 @@ async def _handle_gave(update, user_row, raw, parsed):
         )
         return
 
-    entry_date = parsed.get("entry_date") or None
+    raw_date   = parsed.get("entry_date") or None
+    entry_date = raw_date if (raw_date and _ISO_DATE_RE.match(str(raw_date))) else None
     cat_id     = get_category_id(user_row["id"], "GAVE")
     create_gave(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
 
@@ -277,9 +281,11 @@ async def _handle_gave(update, user_row, raw, parsed):
 
 
 async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
-    entry_date = parsed.get("entry_date") or None
+    raw_date = parsed.get("entry_date") or None
+    # Validate ISO format — reject anything the LLM might return instead (e.g. "August 10")
+    entry_date = raw_date if (raw_date and _ISO_DATE_RE.match(str(raw_date))) else None
+
     create_expense(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
-    daily    = get_daily_total(user_row["id"])
     currency = user_row["currency"]
 
     items     = parsed.get("items", [])
@@ -289,11 +295,19 @@ async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
             f"- {it['name']} {fmt(it['amount'], currency)}" for it in items
         )
 
-    date_note = f" (logged for {entry_date})" if entry_date else ""
+    if entry_date:
+        day_total = get_daily_total(user_row["id"], target_date=entry_date)
+        total_line = f"\n{entry_date} total: {fmt(day_total, currency)}"
+        date_note  = f" (logged for {entry_date})"
+    else:
+        day_total  = get_daily_total(user_row["id"])
+        total_line = f"\nToday so far: {fmt(day_total, currency)}"
+        date_note  = ""
+
     await reply_fn(
         f"Logged under {cat_name} — {fmt(parsed['total_amount'], currency)} total{date_note}"
         + item_line
-        + f"\nToday so far: {fmt(daily, currency)}"
+        + total_line
     )
 
 
