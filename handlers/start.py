@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 ASK_CURRENCY = 0
 ASK_TIMEZONE = 1
+TZ_PICK      = 2
 
 DEFAULT_CATEGORIES = ["FOOD", "TRANSPORT", "BILLS", "CLOTH", "GAVE", "BORROW", "OTHERS"]
 
@@ -148,22 +149,23 @@ async def set_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
-async def timezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Let existing users change their timezone."""
+async def timezone_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for the /timezone ConversationHandler."""
     from db.queries import get_user
     user_row = get_user(update.effective_user.id)
     if not user_row:
         await update.message.reply_text("Please run /start first.")
-        return
+        return ConversationHandler.END
     current = user_row.get("timezone") or "UTC"
     await update.message.reply_text(
         f"Current timezone: {current}\n\nPick your timezone:",
         reply_markup=_tz_keyboard("tz_change"),
     )
+    return TZ_PICK
 
 
-async def handle_tz_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback for /timezone — update an existing user's timezone."""
+async def handle_tz_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Callback for /timezone ConversationHandler — update an existing user's timezone."""
     query = update.callback_query
     await query.answer()
 
@@ -171,16 +173,17 @@ async def handle_tz_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     tz    = parts[1] if len(parts) > 1 else ""
     if tz not in _VALID_TIMEZONES:
         await query.edit_message_text("Invalid selection.")
-        return
+        return ConversationHandler.END
 
     from db.queries import get_user
     user_row = get_user(query.from_user.id)
     if not user_row:
         await query.edit_message_text("Session expired. Run /start.")
-        return
+        return ConversationHandler.END
 
     get_db().table("users").update({"timezone": tz}).eq("id", user_row["id"]).execute()
     await query.edit_message_text(f"Timezone updated to {tz}.")
+    return ConversationHandler.END
 
 
 def _seed_categories(db, user_id: str) -> None:
@@ -193,6 +196,16 @@ def _seed_categories(db, user_id: str) -> None:
 async def _remind_currency(update: Update, _: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Please pick a currency first to get started.")
     return ASK_CURRENCY
+
+
+def build_timezone_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CommandHandler("timezone", timezone_command)],
+        states={
+            TZ_PICK: [CallbackQueryHandler(handle_tz_change, pattern=r"^tz_change:")],
+        },
+        fallbacks=[CommandHandler("timezone", timezone_command)],
+    )
 
 
 def build_handler() -> ConversationHandler:

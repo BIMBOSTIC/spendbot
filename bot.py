@@ -11,7 +11,7 @@ from telegram.ext import (
     filters,
 )
 from config import TELEGRAM_TOKEN
-from handlers.start import build_handler as start_conv, timezone_command, handle_tz_change
+from handlers.start import build_handler as start_conv, build_timezone_handler
 from handlers.expense import handle_text, handle_category_pick
 from handlers.undo import undo, redo, build_edit_handler
 from handlers.gave import gave_summary
@@ -109,6 +109,7 @@ def main() -> None:
 
     # ConversationHandlers must be registered before catch-all handlers
     app.add_handler(start_conv())
+    app.add_handler(build_timezone_handler())
     app.add_handler(build_edit_handler())
     app.add_handler(build_wallet_handler())
     app.add_handler(build_saving_handler())
@@ -131,10 +132,8 @@ def main() -> None:
     app.add_handler(CommandHandler("clear",    clear_command))
     app.add_handler(CommandHandler("help",     help_command))
     app.add_handler(CommandHandler("admin",    admin))
-    app.add_handler(CommandHandler("timezone", timezone_command))
 
     app.add_handler(CallbackQueryHandler(handle_category_pick, pattern=r"^cat_pick:"))
-    app.add_handler(CallbackQueryHandler(handle_tz_change,     pattern=r"^tz_change:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     app.add_error_handler(error_handler)
