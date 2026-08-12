@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import date
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import get_user, create_borrow_entry, get_borrow_balances
@@ -11,12 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_amount_and_party(args: list[str], preposition: str) -> tuple[float | None, str | None]:
-    """Parse [amount, preposition?, name...] from command args."""
     if not args:
         return None, None
     try:
         amount = float(args[0].replace(",", ""))
     except ValueError:
+        return None, None
+    if amount <= 0:
         return None, None
     rest = args[1:]
     if rest and rest[0].lower() == preposition:
@@ -81,7 +83,11 @@ async def handle_borrow_text(reply_fn, user_row: dict, parsed: dict) -> None:
         return
 
     raw_date   = parsed.get("entry_date") or None
-    entry_date = raw_date if (raw_date and _ISO_DATE_RE.match(str(raw_date))) else None
+    entry_date = (
+        raw_date
+        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= date.today().isoformat())
+        else None
+    )
     await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction, entry_date=entry_date)
 
 

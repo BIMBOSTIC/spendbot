@@ -79,9 +79,11 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
         return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", str(y)
 
     # ── "last N days/weeks/months" ────────────────────────────────────────────
+    _CAPS = {"day": 3650, "week": 520, "month": 120}
     _mn = re.match(r'last\s+(\d+)\s+(day|days|week|weeks|month|months)', a)
     if _mn:
         n, unit = int(_mn.group(1)), _mn.group(2).rstrip('s')
+        n = min(n, _CAPS[unit])
         if unit == 'day':
             start = today - timedelta(days=n)
             label = f"Last {n} day{'s' if n != 1 else ''}"
@@ -100,6 +102,7 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
     _mn2 = re.match(r'(\d+)\s+(day|days|week|weeks|month|months)$', a)
     if _mn2:
         n, unit = int(_mn2.group(1)), _mn2.group(2).rstrip('s')
+        n = min(n, _CAPS[unit])
         if unit == 'day':
             start = today - timedelta(days=n)
             label = f"Last {n} day{'s' if n != 1 else ''}"
@@ -132,7 +135,7 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
             end_default = datetime(start_d.year, start_d.month, 1)
             end_d    = dup.parse(m.group(2).strip(), default=end_default, dayfirst=False).date()
         except Exception:
-            raise ValueError(f"Can't parse date range: {arg!r}")
+            raise ValueError("invalid_date_range")
         if end_d > today:
             end_d = today
         if start_d > end_d:
@@ -167,7 +170,7 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
             d = d.replace(year=d.year - 1)
         return f"{d.isoformat()}T00:00:00", f"{d.isoformat()}T23:59:59", _date_label(d, today)
     except Exception:
-        raise ValueError(f"Can't parse date: {arg!r}")
+        raise ValueError("invalid_date")
 
 
 async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str | None = None) -> None:
@@ -209,6 +212,9 @@ async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str 
         cleared_norm = str(cleared_at).replace(" ", "T")[:19]
         if start < cleared_norm:
             start = cleared_norm
+        if start > end:
+            await reply_fn(f"No expenses logged for {label.lower()} — history was cleared after this period.")
+            return
 
     currency = user_row["currency"]
 

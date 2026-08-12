@@ -81,12 +81,15 @@ async def set_currency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     insert_result = (
         db.table("users")
-        .insert({
-            "telegram_id":  tg_user.id,
-            "display_name": tg_user.first_name,
-            "currency":     currency,
-            "timezone":     "Europe/Istanbul",
-        })
+        .upsert(
+            {
+                "telegram_id":  tg_user.id,
+                "display_name": tg_user.first_name,
+                "currency":     currency,
+                "timezone":     "Europe/Istanbul",
+            },
+            on_conflict="telegram_id",
+        )
         .execute()
     )
 

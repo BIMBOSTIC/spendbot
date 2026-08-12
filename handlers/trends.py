@@ -124,6 +124,7 @@ async def show_price_leaders(reply_fn, user_row: dict) -> None:
 
 
 def _build_chart_url(item_name: str, history: list[dict]) -> str:
+    history = history[-50:]  # cap to 50 most recent points to keep URL short
     labels = [h["date"] for h in history]
     data = [h["amount"] for h in history]
 

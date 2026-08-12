@@ -17,7 +17,7 @@ def get_category_id(user_id: str, name: str) -> str | None:
         get_db().table("categories")
         .select("id")
         .eq("user_id", user_id)
-        .eq("name", name)
+        .eq("name", name.strip().upper())
         .execute()
     )
     return r.data[0]["id"] if r.data else None
@@ -79,16 +79,23 @@ def create_expense(user_id: str, raw: str, parsed: dict, category_id: str | None
 
     entry = db.table("expense_entries").insert(row).execute().data[0]
 
-    for item in parsed.get("items", []):
-        item_id = get_or_create_item(user_id, item["name"], category_id)
-        li_row: dict = {
-            "expense_entry_id": entry["id"],
-            "item_id": item_id,
-            "amount": item["amount"],
-        }
-        if entry_date:
-            li_row["created_at"] = f"{entry_date}T12:00:00"
-        db.table("line_items").insert(li_row).execute()
+    try:
+        for item in parsed.get("items", []):
+            item_id = get_or_create_item(user_id, item["name"], category_id)
+            li_row: dict = {
+                "expense_entry_id": entry["id"],
+                "item_id": item_id,
+                "amount": item["amount"],
+            }
+            if entry_date:
+                li_row["created_at"] = f"{entry_date}T12:00:00"
+            db.table("line_items").insert(li_row).execute()
+    except Exception:
+        try:
+            db.table("expense_entries").delete().eq("id", entry["id"]).execute()
+        except Exception:
+            pass
+        raise
 
     return entry
 
@@ -105,14 +112,31 @@ def get_recent_entries(user_id: str, limit: int = 3) -> list[dict]:
     return r.data
 
 
-def restore_expense_entry(user_id: str, raw: str, total_amount: float, category_id: str | None) -> dict:
-    r = get_db().table("expense_entries").insert({
+def restore_expense_entry(user_id: str, raw: str, total_amount: float, category_id: str | None, items: list[dict] | None = None) -> dict:
+    db = get_db()
+    r = db.table("expense_entries").insert({
         "user_id": user_id,
         "raw_message": raw,
         "category_id": category_id,
         "total_amount": total_amount,
     }).execute()
-    return r.data[0]
+    entry = r.data[0]
+
+    if items:
+        for item in items:
+            if not item.get("name"):
+                continue
+            try:
+                item_id = get_or_create_item(user_id, item["name"], category_id)
+                db.table("line_items").insert({
+                    "expense_entry_id": entry["id"],
+                    "item_id": item_id,
+                    "amount": item["amount"],
+                }).execute()
+            except Exception:
+                pass  # best-effort — don't fail the whole redo
+
+    return entry
 
 
 def get_last_entry(user_id: str) -> dict | None:
@@ -124,13 +148,19 @@ def delete_entry(entry_id: str, user_id: str) -> None:
     get_db().table("expense_entries").delete().eq("id", entry_id).eq("user_id", user_id).execute()
 
 
-def get_daily_total(user_id: str, target_date: str | None = None) -> float:
-    d = target_date or date.today().isoformat()
+def get_daily_total(user_id: str, target_date: str | None = None, after: str | None = None) -> float:
+    d     = target_date or date.today().isoformat()
+    lower = f"{d}T00:00:00"
+    # Respect history_cleared_at — don't count entries before the clear boundary
+    if after:
+        cleared_norm = str(after).replace(" ", "T")[:19]
+        if cleared_norm > lower:
+            lower = cleared_norm
     r = (
         get_db().table("expense_entries")
         .select("total_amount")
         .eq("user_id", user_id)
-        .gte("created_at", f"{d}T00:00:00")
+        .gte("created_at", lower)
         .lte("created_at", f"{d}T23:59:59")
         .execute()
     )
@@ -152,11 +182,18 @@ def create_gave(user_id: str, raw: str, parsed: dict, category_id: str | None, e
         row["created_at"] = f"{entry_date}T12:00:00"
     entry = db.table("expense_entries").insert(row).execute().data[0]
 
-    db.table("gave_entries").insert({
-        "expense_entry_id": entry["id"],
-        "recipient_name": gave["recipient"].lower().strip(),
-        "amount": gave["amount"],
-    }).execute()
+    try:
+        db.table("gave_entries").insert({
+            "expense_entry_id": entry["id"],
+            "recipient_name": gave["recipient"].lower().strip(),
+            "amount": gave["amount"],
+        }).execute()
+    except Exception:
+        try:
+            db.table("expense_entries").delete().eq("id", entry["id"]).execute()
+        except Exception:
+            pass
+        raise
 
     return entry
 
@@ -186,10 +223,13 @@ def get_gave_total_ytd(user_id: str, recipient: str) -> float:
 
 def get_gave_summary(user_id: str) -> list[dict]:
     db = get_db()
+    # 5-year lookback — keeps memory bounded for long-term users
+    cutoff = date(date.today().year - 5, 1, 1).isoformat()
     entries = (
         db.table("expense_entries")
         .select("id, created_at")
         .eq("user_id", user_id)
+        .gte("created_at", f"{cutoff}T00:00:00")
         .execute()
     )
     if not entries.data:
@@ -378,13 +418,39 @@ def get_summary(user_id: str, start: str, end: str, category: str | None = None)
 
 # ── Redo state (DB-backed so it survives bot restarts) ───────────────────────
 
-def save_redo_state(user_id: str, raw: str, total_amount: float, category_id: str | None) -> None:
-    get_db().table("redo_state").upsert({
+def get_line_items_for_entry(entry_id: str) -> list[dict]:
+    r = (
+        get_db().table("line_items")
+        .select("amount, items(canonical_name)")
+        .eq("expense_entry_id", entry_id)
+        .execute()
+    )
+    return [
+        {
+            "name":   (row.get("items") or {}).get("canonical_name", ""),
+            "amount": float(row["amount"]),
+        }
+        for row in r.data
+        if (row.get("items") or {}).get("canonical_name")
+    ]
+
+
+def save_redo_state(user_id: str, raw: str, total_amount: float, category_id: str | None, items: list[dict] | None = None) -> None:
+    import json as _json
+    payload: dict = {
         "user_id":      user_id,
         "raw":          raw,
         "total_amount": total_amount,
         "category_id":  category_id,
-    }).execute()
+    }
+    if items is not None:
+        try:
+            payload["items_json"] = _json.dumps(items)
+            get_db().table("redo_state").upsert(payload).execute()
+            return
+        except Exception:
+            payload.pop("items_json", None)
+    get_db().table("redo_state").upsert(payload).execute()
 
 
 def pop_redo_state(user_id: str) -> dict | None:
@@ -558,23 +624,29 @@ def get_item_price_history(user_id: str, canonical_name: str) -> list[dict]:
     return sorted(results, key=lambda x: x["date"])
 
 
+def _esc_like(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def search_items(user_id: str, query: str) -> list[str]:
+    safe = _esc_like(query.lower())
     r = (
         get_db().table("items")
         .select("canonical_name")
         .eq("user_id", user_id)
-        .ilike("canonical_name", f"%{query.lower()}%")
+        .ilike("canonical_name", f"%{safe}%")
         .execute()
     )
     return [row["canonical_name"] for row in r.data]
 
 
 def search_items_by_prefix(user_id: str, query: str) -> list[str]:
+    safe = _esc_like(query.lower())
     r = (
         get_db().table("items")
         .select("canonical_name")
         .eq("user_id", user_id)
-        .ilike("canonical_name", f"{query.lower()}%")
+        .ilike("canonical_name", f"{safe}%")
         .execute()
     )
     return [row["canonical_name"] for row in r.data]
@@ -583,11 +655,12 @@ def search_items_by_prefix(user_id: str, query: str) -> list[str]:
 def get_item_summary_by_prefix(user_id: str, prefix: str, start: str, end: str) -> dict:
     """Aggregate line_items for all items whose canonical_name starts with prefix."""
     db = get_db()
+    safe_prefix = _esc_like(prefix.lower())
     items_r = (
         db.table("items")
         .select("id, canonical_name")
         .eq("user_id", user_id)
-        .ilike("canonical_name", f"{prefix.lower()}%")
+        .ilike("canonical_name", f"{safe_prefix}%")
         .execute()
     )
     if not items_r.data:
@@ -643,22 +716,30 @@ def get_price_change_leaders(user_id: str, top_n: int = 5) -> list[dict]:
     if not items_r.data:
         return []
 
+    item_map  = {item["id"]: item["canonical_name"] for item in items_r.data}
+    item_ids  = list(item_map.keys())
+
+    # Single batch query instead of N+1
+    li_r = (
+        db.table("line_items")
+        .select("item_id, amount, expense_entries(created_at)")
+        .in_("item_id", item_ids)
+        .execute()
+    )
+
+    by_item: dict[str, list[dict]] = {}
+    for row in li_r.data:
+        entry = row.get("expense_entries")
+        if not entry:
+            continue
+        by_item.setdefault(row["item_id"], []).append({
+            "date":   entry["created_at"][:10],
+            "amount": float(row["amount"]),
+        })
+
     results = []
-    for item in items_r.data:
-        li = (
-            db.table("line_items")
-            .select("amount, expense_entries(created_at)")
-            .eq("item_id", item["id"])
-            .execute()
-        )
-        entries = sorted(
-            [
-                {"date": row["expense_entries"]["created_at"][:10], "amount": float(row["amount"])}
-                for row in li.data
-                if row.get("expense_entries")
-            ],
-            key=lambda x: x["date"],
-        )
+    for item_id, entries in by_item.items():
+        entries = sorted(entries, key=lambda x: x["date"])
         if len(entries) < 2:
             continue
         first, last = entries[0], entries[-1]
@@ -666,13 +747,13 @@ def get_price_change_leaders(user_id: str, top_n: int = 5) -> list[dict]:
             continue
         change_pct = ((last["amount"] - first["amount"]) / first["amount"]) * 100
         results.append({
-            "name": item["canonical_name"],
+            "name":         item_map[item_id],
             "first_amount": first["amount"],
-            "last_amount": last["amount"],
-            "first_date": first["date"],
-            "last_date": last["date"],
-            "change_pct": change_pct,
-            "count": len(entries),
+            "last_amount":  last["amount"],
+            "first_date":   first["date"],
+            "last_date":    last["date"],
+            "change_pct":   change_pct,
+            "count":        len(entries),
         })
 
     return sorted(results, key=lambda x: abs(x["change_pct"]), reverse=True)[:top_n]

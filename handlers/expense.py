@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db.queries import (
@@ -51,9 +52,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text       = update.message.text.strip()
     text_lower = text.lower()
 
+    if len(text) > 500:
+        await update.message.reply_text(
+            "Message too long — please keep it under 500 characters.\n"
+            "Try: bread 100, milk 80"
+        )
+        return
+
     # ── Custom category awaiting input ────────────────────────────────────────
     if context.user_data.get(CUSTOM_CAT_KEY):
-        cat_name = text.strip().upper()
+        cat_name = text.strip().upper()[:30]
         if not cat_name:
             await update.message.reply_text("Category name can't be empty — type a name (e.g. HEALTH, FUEL):")
             return  # leave flags intact so next message is still intercepted
@@ -274,7 +282,7 @@ async def _handle_expense(update, context, user_row, raw, parsed):
     cat     = raw_cat.strip().upper() if raw_cat else None  # normalise LLM output
     amount  = parsed.get("total_amount", 0)
 
-    if amount == 0:
+    if amount <= 0:
         items = parsed.get("items", [])
         hint  = items[0]["name"] if items else "item"
         await update.message.reply_text(
@@ -293,6 +301,8 @@ async def _handle_expense(update, context, user_row, raw, parsed):
         return
 
     cat_id = get_category_id(user_row["id"], cat)
+    if cat_id is None:
+        cat_id = get_or_create_category(user_row["id"], cat)
     await _save_and_confirm(update.message.reply_text, user_row, raw, parsed, cat, cat_id)
 
 
@@ -306,8 +316,14 @@ async def _handle_gave(update, user_row, raw, parsed):
         return
 
     raw_date   = parsed.get("entry_date") or None
-    entry_date = raw_date if (raw_date and _ISO_DATE_RE.match(str(raw_date))) else None
-    cat_id     = get_category_id(user_row["id"], "GAVE")
+    entry_date = (
+        raw_date
+        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= date.today().isoformat())
+        else None
+    )
+    cat_id = get_category_id(user_row["id"], "GAVE")
+    if cat_id is None:
+        cat_id = get_or_create_category(user_row["id"], "GAVE")
     create_gave(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
 
     currency  = user_row["currency"]
@@ -323,8 +339,12 @@ async def _handle_gave(update, user_row, raw, parsed):
 
 async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
     raw_date = parsed.get("entry_date") or None
-    # Validate ISO format — reject anything the LLM might return instead (e.g. "August 10")
-    entry_date = raw_date if (raw_date and _ISO_DATE_RE.match(str(raw_date))) else None
+    # Validate: ISO format and not in the future
+    entry_date = (
+        raw_date
+        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= date.today().isoformat())
+        else None
+    )
 
     create_expense(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
     currency = user_row["currency"]
@@ -336,12 +356,13 @@ async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
             f"- {it['name']} {fmt(it['amount'], currency)}" for it in items
         )
 
+    cleared_at = user_row.get("history_cleared_at")
     if entry_date:
-        day_total = get_daily_total(user_row["id"], target_date=entry_date)
+        day_total  = get_daily_total(user_row["id"], target_date=entry_date, after=cleared_at)
         total_line = f"\n{entry_date} total: {fmt(day_total, currency)}"
         date_note  = f" (logged for {entry_date})"
     else:
-        day_total  = get_daily_total(user_row["id"])
+        day_total  = get_daily_total(user_row["id"], after=cleared_at)
         total_line = f"\nToday so far: {fmt(day_total, currency)}"
         date_note  = ""
 
@@ -356,7 +377,7 @@ async def _handle_query(update, user_row, parsed) -> None:
     from handlers.summary import send_summary
     from handlers.trends import show_price_leaders
 
-    query_intent = (parsed.get("query_intent") or "").lower()
+    query_intent = (parsed.get("query_intent") or "").lower()[:200]
 
     balance_keywords = ["balance", "owe", "debt", "borrow", "repaid"]
     if any(kw in query_intent for kw in balance_keywords):
@@ -445,6 +466,8 @@ async def handle_category_pick(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     cat_id = get_category_id(user_row["id"], cat_name)
+    if cat_id is None:
+        cat_id = get_or_create_category(user_row["id"], cat_name)
     await _save_and_confirm(
         query.edit_message_text,
         user_row,

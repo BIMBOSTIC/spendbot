@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import httpx
 from config import HELIUS_API_KEY, MORALIS_API_KEY
 from db.wallet_queries import upsert_trade, update_last_synced
@@ -59,7 +59,7 @@ def _parse_helius_swap(tx: dict) -> dict | None:
     in_mint, amount_in = None, 0.0
     if swap.get("nativeInput"):
         in_mint   = _SOL_MINT
-        amount_in = int(swap["nativeInput"].get("amount", 0)) / 1e9
+        amount_in = float(swap["nativeInput"].get("amount", 0)) / 1e9
     elif swap.get("tokenInputs"):
         inp       = swap["tokenInputs"][0]
         in_mint   = inp.get("mint")
@@ -70,7 +70,7 @@ def _parse_helius_swap(tx: dict) -> dict | None:
     out_mint, amount_out = None, 0.0
     if swap.get("nativeOutput"):
         out_mint   = _SOL_MINT
-        amount_out = int(swap["nativeOutput"].get("amount", 0)) / 1e9
+        amount_out = float(swap["nativeOutput"].get("amount", 0)) / 1e9
     elif swap.get("tokenOutputs"):
         out        = swap["tokenOutputs"][0]
         out_mint   = out.get("mint")
@@ -213,7 +213,19 @@ async def _sync_evm_wallet(wallet: dict) -> int:
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
+_SYNC_COOLDOWN = timedelta(minutes=5)
+
+
 async def sync_wallet(wallet: dict) -> int:
+    last_synced = wallet.get("last_synced_at")
+    if last_synced:
+        try:
+            last_dt = datetime.fromisoformat(last_synced.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - last_dt < _SYNC_COOLDOWN:
+                return 0  # synced recently — skip API call
+        except (ValueError, TypeError):
+            pass
+
     if wallet.get("chain", "SOL") == "SOL":
         return await _sync_sol_wallet(wallet)
     return await _sync_evm_wallet(wallet)

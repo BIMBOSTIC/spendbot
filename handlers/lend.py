@@ -1,8 +1,13 @@
 import logging
+import re
+from datetime import date
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import get_user, create_borrow_entry, get_lend_balances
 from utils import fmt
+
+_ISO_DATE_RE    = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_VALID_LEND_DIR = {"lent", "lent_repaid"}
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +18,8 @@ def _parse_amount_and_party(args: list[str], preposition: str) -> tuple[float | 
     try:
         amount = float(args[0].replace(",", ""))
     except ValueError:
+        return None, None
+    if amount <= 0:
         return None, None
     rest = args[1:]
     if rest and rest[0].lower() == preposition:
@@ -100,6 +107,9 @@ async def handle_lend_text(reply_fn, user_row: dict, parsed: dict) -> None:
     direction = borrow_data.get("direction", "lent")
     if direction == "collected":
         direction = "lent_repaid"
+    if direction not in _VALID_LEND_DIR:
+        await reply_fn("Couldn't parse that lend entry. Try: /lend 500 to pedro")
+        return
 
     counterparty = borrow_data.get("counterparty")
     amount       = borrow_data.get("amount", 0)
@@ -110,7 +120,12 @@ async def handle_lend_text(reply_fn, user_row: dict, parsed: dict) -> None:
             await reply_fn(f"Include a name — e.g. lend {int(amount)} to pedro")
         return
 
-    entry_date = parsed.get("entry_date") or None
+    raw_date   = parsed.get("entry_date") or None
+    entry_date = (
+        raw_date
+        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= date.today().isoformat())
+        else None
+    )
     await _log_and_confirm(reply_fn, user_row, counterparty, amount, direction, entry_date=entry_date)
 
 

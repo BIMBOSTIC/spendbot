@@ -18,4 +18,11 @@ CURRENCY_SYMBOLS = {
 
 def fmt(amount: float, currency: str) -> str:
     symbol = CURRENCY_SYMBOLS.get(currency, currency)
-    return f"{symbol}{int(amount):,}"
+    try:
+        if amount != amount or amount == float("inf") or amount == float("-inf"):
+            return f"{symbol}?"
+        if amount == int(amount):
+            return f"{symbol}{int(amount):,}"
+        return f"{symbol}{amount:,.2f}"
+    except (TypeError, ValueError, OverflowError):
+        return f"{symbol}?"

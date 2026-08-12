@@ -97,10 +97,14 @@ async def error_handler(update: object, context) -> None:
 
 def main() -> None:
     sentry_setup.init()
+    from config import ADMIN_TELEGRAM_ID
+    if not ADMIN_TELEGRAM_ID:
+        logger.warning("ADMIN_TELEGRAM_ID not set — /admin command is disabled")
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Rate limiter runs first, before any other handler
+    # Rate limiter runs first, before any other handler (covers both messages and button taps)
     app.add_handler(MessageHandler(filters.ALL, _rate_limit), group=-1)
+    app.add_handler(CallbackQueryHandler(_rate_limit), group=-1)
 
     # ConversationHandlers must be registered before catch-all handlers
     app.add_handler(start_conv())

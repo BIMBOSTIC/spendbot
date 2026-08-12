@@ -205,7 +205,7 @@ async def chain_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def receive_label(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    label = update.message.text.strip() or None
+    label = update.message.text.strip()[:50] or None
     return await _finish_add(update, context, label)
 
 
