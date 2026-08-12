@@ -107,19 +107,57 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await gave_summary(update, context)
         return
 
-    if text_lower in ("savings", "saving", "my savings", "saving status", "savings status"):
+    # ── Savings free-text routing ─────────────────────────────────────────────
+    _SAVINGS_PERIODS = {"today", "week", "month", "all"}
+    _savings_exact = {"savings", "saving", "my savings", "saving status", "savings status"}
+    if text_lower in _savings_exact:
         from handlers.savings import send_savings_summary
         await send_savings_summary(update.message.reply_text, user_row, "all")
         return
+
+    if text_lower.startswith("savings ") or text_lower.startswith("saving "):
+        _sv_pfx = "savings " if text_lower.startswith("savings ") else "saving "
+        _sv_rest = text_lower[len(_sv_pfx):]
+
+        if _sv_rest.startswith("set "):
+            _sv_parts = _sv_rest.split()
+            if len(_sv_parts) >= 2:
+                try:
+                    _sv_amount = float(_sv_parts[1].replace(",", "."))
+                    if _sv_amount > 0:
+                        from db.savings_queries import set_savings_goal
+                        set_savings_goal(user_row["id"], _sv_amount)
+                        await update.message.reply_text(
+                            f"Daily savings target updated to {fmt(_sv_amount, user_row['currency'])}."
+                        )
+                        return
+                except ValueError:
+                    pass
+            await update.message.reply_text("Usage: saving set <amount>\nExample: saving set 1000")
+            return
+
+        if _sv_rest in _SAVINGS_PERIODS:
+            from handlers.savings import send_savings_summary
+            await send_savings_summary(update.message.reply_text, user_row, _sv_rest)
+            return
+
+        try:
+            _sv_amount = float(_sv_rest.replace(",", "."))
+            if _sv_amount > 0:
+                from handlers.savings import handle_savings_log
+                await handle_savings_log(update.message.reply_text, user_row, _sv_amount)
+                return
+        except ValueError:
+            pass  # fall through to LLM
 
     if text_lower in ("wallet", "wallets", "my wallet", "my wallets"):
         from handlers.wallet import send_wallet_stats
         await send_wallet_stats(update.message.reply_text, user_row, "all")
         return
 
-    # ── Summary aliases ───────────────────────────────────────────────────────
+    # ── Summary / report aliases ──────────────────────────────────────────────
 
-    _summary_aliases = ("summary", "report", "stats")
+    _summary_aliases = ("summary", "stats")
     _trends_aliases  = ("trends", "history", "chart", "graph")
 
     if any(text_lower.startswith(a) for a in _summary_aliases):
@@ -144,6 +182,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await send_summary(update.message.reply_text, user_row, period_str, category=category)
         return
 
+    # "report [period]" → Excel export
+    if text_lower == "report" or text_lower.startswith("report "):
+        _rpt_period = text_lower[7:].strip() if text_lower.startswith("report ") else "month"
+        from handlers.report import send_report
+        await send_report(update.message.reply_text, update.message.reply_document, user_row, _rpt_period or "month")
+        return
+
     if any(text_lower.startswith(a) for a in _trends_aliases):
         keyword = next(a for a in _trends_aliases if text_lower.startswith(a))
         item    = text[len(keyword):].strip()
@@ -154,17 +199,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("Usage: trends <item>\nExample: trends bread")
         return
 
-    # ── Savings log shortcut — "saved 500" / "saving 500" ────────────────────
-
-    _savings_prefixes = ("saved ", "saving ")
-    if any(text_lower.startswith(p) for p in _savings_prefixes):
-        prefix     = next(p for p in _savings_prefixes if text_lower.startswith(p))
-        raw_amount = text[len(prefix):].strip()
+    # ── Savings log shortcut — "saved 500" ───────────────────────────────────
+    if text_lower.startswith("saved "):
         try:
-            amount = float(raw_amount.replace(",", "."))
-            if amount > 0:
+            _sv_amount = float(text[6:].strip().replace(",", "."))
+            if _sv_amount > 0:
                 from handlers.savings import handle_savings_log
-                await handle_savings_log(update.message.reply_text, user_row, amount)
+                await handle_savings_log(update.message.reply_text, user_row, _sv_amount)
                 return
         except ValueError:
             pass  # fall through to LLM

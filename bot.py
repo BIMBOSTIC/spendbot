@@ -23,6 +23,8 @@ from handlers.wallet import build_wallet_handler, winrate_command, trades_comman
 from handlers.savings import build_saving_handler, saved_command, savings_command
 from handlers.lend import lend
 from handlers.admin import admin
+from handlers.clear import clear_command
+from handlers.report import report_command
 from rate_limit import is_allowed, should_warn
 import sentry_setup
 
@@ -59,6 +61,8 @@ HELP_TEXT = (
     "/saving      — set daily savings target  (/saving set <amount> to update)\n"
     "/saved       — log today's saving  (/saved 500)\n"
     "/savings     — savings summary  (today/week/month/all)\n"
+    "/report      — Excel export  (week/month/last month/2 months/year)\n"
+    "/clear       — archive history  (data stays in DB; summaries reset to today)\n"
     "/help        — this message"
 )
 
@@ -118,6 +122,8 @@ def main() -> None:
     app.add_handler(CommandHandler("trades",   trades_command))
     app.add_handler(CommandHandler("saved",    saved_command))
     app.add_handler(CommandHandler("savings",  savings_command))
+    app.add_handler(CommandHandler("report",   report_command))
+    app.add_handler(CommandHandler("clear",    clear_command))
     app.add_handler(CommandHandler("help",     help_command))
     app.add_handler(CommandHandler("admin",    admin))
 

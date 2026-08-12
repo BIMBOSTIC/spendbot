@@ -451,6 +451,58 @@ def get_admin_stats(today: str) -> dict:
     }
 
 
+def clear_user_history(user_id: str) -> str:
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().table("users").update({"history_cleared_at": now}).eq("id", user_id).execute()
+    return now
+
+
+def get_entries_for_export(user_id: str, start: str, end: str) -> list[dict]:
+    db = get_db()
+    entries_r = (
+        db.table("expense_entries")
+        .select("id, total_amount, raw_message, created_at, categories(name)")
+        .eq("user_id", user_id)
+        .gte("created_at", start)
+        .lte("created_at", end)
+        .order("created_at")
+        .execute()
+    )
+
+    entries = []
+    for entry in entries_r.data:
+        cat_name = (entry.get("categories") or {}).get("name", "OTHERS")
+        if cat_name == "BORROW":
+            continue
+        entries.append({
+            "id":           entry["id"],
+            "date":         entry["created_at"][:10],
+            "category":     cat_name,
+            "total_amount": float(entry["total_amount"]),
+            "raw_message":  entry["raw_message"],
+            "items":        [],
+        })
+
+    if not entries:
+        return []
+
+    entry_ids = [e["id"] for e in entries]
+    li_r = (
+        db.table("line_items")
+        .select("expense_entry_id, amount, items(canonical_name)")
+        .in_("expense_entry_id", entry_ids)
+        .execute()
+    )
+    entry_map = {e["id"]: e for e in entries}
+    for li in li_r.data:
+        eid = li["expense_entry_id"]
+        if eid in entry_map:
+            name = (li.get("items") or {}).get("canonical_name", "")
+            entry_map[eid]["items"].append({"name": name, "amount": float(li["amount"])})
+
+    return entries
+
+
 def log_parse_failure(user_id: str | None, raw: str, error_reason: str = "") -> None:
     try:
         get_db().table("parse_failures").insert({

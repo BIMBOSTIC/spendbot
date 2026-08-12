@@ -1,7 +1,7 @@
 import calendar
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import get_user, get_summary, get_item_summary_by_prefix
@@ -78,6 +78,42 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
         end   = date(y, 12, 31)
         return f"{start.isoformat()}T00:00:00", f"{end.isoformat()}T23:59:59", str(y)
 
+    # ── "last N days/weeks/months" ────────────────────────────────────────────
+    _mn = re.match(r'last\s+(\d+)\s+(day|days|week|weeks|month|months)', a)
+    if _mn:
+        n, unit = int(_mn.group(1)), _mn.group(2).rstrip('s')
+        if unit == 'day':
+            start = today - timedelta(days=n)
+            label = f"Last {n} day{'s' if n != 1 else ''}"
+        elif unit == 'week':
+            start = today - timedelta(weeks=n)
+            label = f"Last {n} week{'s' if n != 1 else ''}"
+        else:
+            m_num, y = today.month - n, today.year
+            while m_num <= 0:
+                m_num += 12; y -= 1
+            start = date(y, m_num, 1)
+            label = f"Last {n} month{'s' if n != 1 else ''}"
+        return f"{start.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", label
+
+    # ── "N days/weeks/months" shorthand — e.g. "2 months", "3 weeks" ─────────
+    _mn2 = re.match(r'(\d+)\s+(day|days|week|weeks|month|months)$', a)
+    if _mn2:
+        n, unit = int(_mn2.group(1)), _mn2.group(2).rstrip('s')
+        if unit == 'day':
+            start = today - timedelta(days=n)
+            label = f"Last {n} day{'s' if n != 1 else ''}"
+        elif unit == 'week':
+            start = today - timedelta(weeks=n)
+            label = f"Last {n} week{'s' if n != 1 else ''}"
+        else:
+            m_num, y = today.month - n, today.year
+            while m_num <= 0:
+                m_num += 12; y -= 1
+            start = date(y, m_num, 1)
+            label = f"Last {n} month{'s' if n != 1 else ''}"
+        return f"{start.isoformat()}T00:00:00", f"{today.isoformat()}T23:59:59", label
+
     # ── 4-digit year: "2024", "2025" ─────────────────────────────────────────
     if re.fullmatch(r"\d{4}", a):
         y     = int(a)
@@ -90,10 +126,10 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
     if m:
         try:
             from dateutil import parser as dup
-            default  = date(today.year, 1, 1)
+            default  = datetime(today.year, 1, 1)
             start_d  = dup.parse(m.group(1).strip(), default=default, dayfirst=False).date()
             # Use start's month/year as default so "jul 1 to 31" → July 31
-            end_default = date(start_d.year, start_d.month, 1)
+            end_default = datetime(start_d.year, start_d.month, 1)
             end_d    = dup.parse(m.group(2).strip(), default=end_default, dayfirst=False).date()
         except Exception:
             raise ValueError(f"Can't parse date range: {arg!r}")
@@ -125,7 +161,7 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
     # ── Single specific date: "jan 10", "jan 10th", "january 10 2024" ─────────
     try:
         from dateutil import parser as dup
-        parsed_dt = dup.parse(arg, default=date(today.year, 1, 1), dayfirst=False)
+        parsed_dt = dup.parse(arg, default=datetime(today.year, 1, 1), dayfirst=False)
         d         = parsed_dt.date()
         if d > today:
             d = d.replace(year=d.year - 1)
@@ -166,6 +202,14 @@ async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str 
         return
 
     start, end, label = resolved
+
+    # Respect history clear boundary
+    cleared_at = user_row.get("history_cleared_at")
+    if cleared_at:
+        cleared_norm = str(cleared_at).replace(" ", "T")[:19]
+        if start < cleared_norm:
+            start = cleared_norm
+
     currency = user_row["currency"]
 
     if item_prefix:
