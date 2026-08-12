@@ -358,7 +358,9 @@ async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
 
     cleared_at = user_row.get("history_cleared_at")
     if entry_date:
-        day_total  = get_daily_total(user_row["id"], target_date=entry_date, after=cleared_at, tz_name=tz_name)
+        # Don't apply cleared_at for backdated totals — backdated entries are stored at
+        # noon on the past date, so a cleared_at timestamp from today would exclude them.
+        day_total  = get_daily_total(user_row["id"], target_date=entry_date, tz_name=tz_name)
         total_line = f"\n{entry_date} total: {fmt(day_total, currency)}"
         date_note  = f" (logged for {entry_date})"
     else:
