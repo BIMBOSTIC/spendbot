@@ -43,7 +43,7 @@ async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     save_redo_state(user_row["id"], raw, float(amount), entry.get("category_id"), items=items)
 
     delete_entry(entry["id"], user_row["id"])
-    daily = get_daily_total(user_row["id"], after=user_row.get("history_cleared_at"))
+    daily = get_daily_total(user_row["id"], after=user_row.get("history_cleared_at"), tz_name=user_row.get("timezone", "UTC"))
 
     await update.message.reply_text(
         f"Undone: {fmt(amount, currency)}"
@@ -75,7 +75,7 @@ async def redo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         redo_data.get("category_id"),
         items=items,
     )
-    daily    = get_daily_total(user_row["id"], after=user_row.get("history_cleared_at"))
+    daily    = get_daily_total(user_row["id"], after=user_row.get("history_cleared_at"), tz_name=user_row.get("timezone", "UTC"))
     currency = user_row["currency"]
 
     await update.message.reply_text(

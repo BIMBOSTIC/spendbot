@@ -59,8 +59,9 @@ Return this exact JSON schema (null for unused fields):
 """
 
 
-async def parse_message(text: str) -> dict:
-    today_str = _date.today().isoformat()
+async def parse_message(text: str, today_str: str | None = None) -> dict:
+    if today_str is None:
+        today_str = _date.today().isoformat()
     response = await _client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,

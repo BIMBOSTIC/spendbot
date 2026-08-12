@@ -12,6 +12,7 @@ from telegram.ext import (
     filters,
 )
 from db.queries import get_user
+from utils import user_today
 from db.wallet_queries import (
     add_wallet, get_user_wallets, get_wallet_by_address,
     get_wallet_stats, get_trades, get_all_wallets,
@@ -56,8 +57,8 @@ def _short(address: str) -> str:
     return f"{address[:4]}...{address[-4:]}"
 
 
-def _period_bounds(period: str) -> tuple[str, str]:
-    today = date.today()
+def _period_bounds(period: str, today: date | None = None) -> tuple[str, str]:
+    today = today or date.today()
     if period in ("today", ""):
         start = today
         end   = today
@@ -266,7 +267,7 @@ async def send_wallet_stats(reply_fn, user_row: dict, period: str = "all") -> No
         await reply_fn("No wallets tracked. Add one with /wallet add")
         return
 
-    start, end   = _period_bounds(period)
+    start, end   = _period_bounds(period, today=user_today(user_row))
     period_label = period if period != "all" else "all time"
 
     for w in wallets:
@@ -318,7 +319,7 @@ async def send_trades(reply_fn, user_row: dict, period: str = "today") -> None:
         await reply_fn("No wallets tracked. Add one with /wallet add")
         return
 
-    start, end = _period_bounds(period)
+    start, end = _period_bounds(period, today=user_today(user_row))
     wallet     = wallets[0]
     chain      = wallet.get("chain", "SOL")
     label      = wallet.get("label") or f"{chain} {_short(wallet['address'])}"

@@ -148,20 +148,36 @@ def delete_entry(entry_id: str, user_id: str) -> None:
     get_db().table("expense_entries").delete().eq("id", entry_id).eq("user_id", user_id).execute()
 
 
-def get_daily_total(user_id: str, target_date: str | None = None, after: str | None = None) -> float:
-    d     = target_date or date.today().isoformat()
-    lower = f"{d}T00:00:00"
+def get_daily_total(user_id: str, target_date: str | None = None, after: str | None = None, tz_name: str = "UTC") -> float:
+    from zoneinfo import ZoneInfo
+    from datetime import datetime, timezone as _utc
+    try:
+        tz = ZoneInfo(tz_name or "UTC")
+    except Exception:
+        tz = ZoneInfo("UTC")
+
+    if target_date:
+        d = date.fromisoformat(target_date)
+    else:
+        d = datetime.now(tz).date()
+
+    start_dt = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz).astimezone(_utc)
+    end_dt   = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=tz).astimezone(_utc)
+    lower = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    upper = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
     # Respect history_cleared_at — don't count entries before the clear boundary
     if after:
         cleared_norm = str(after).replace(" ", "T")[:19]
         if cleared_norm > lower:
             lower = cleared_norm
+
     r = (
         get_db().table("expense_entries")
         .select("total_amount")
         .eq("user_id", user_id)
         .gte("created_at", lower)
-        .lte("created_at", f"{d}T23:59:59")
+        .lte("created_at", upper)
         .execute()
     )
     return float(sum(row["total_amount"] for row in r.data))

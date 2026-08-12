@@ -1,6 +1,5 @@
 import logging
 import re
-from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db.queries import (
@@ -8,7 +7,7 @@ from db.queries import (
     get_daily_total, get_gave_total_ytd, log_parse_failure,
 )
 from llm_parser import parse_message
-from utils import fmt
+from utils import fmt, user_today
 
 _ISO_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
@@ -221,7 +220,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # ── LLM parsing ───────────────────────────────────────────────────────────
 
     try:
-        parsed = await parse_message(text)
+        parsed = await parse_message(text, today_str=user_today(user_row).isoformat())
     except Exception as exc:
         logger.exception("Parser failed for input: %s", text)
         log_parse_failure(user_row["id"], text, error_reason=f"parser_exception: {exc}")
@@ -318,7 +317,7 @@ async def _handle_gave(update, user_row, raw, parsed):
     raw_date   = parsed.get("entry_date") or None
     entry_date = (
         raw_date
-        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= date.today().isoformat())
+        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= user_today(user_row).isoformat())
         else None
     )
     cat_id = get_category_id(user_row["id"], "GAVE")
@@ -339,15 +338,16 @@ async def _handle_gave(update, user_row, raw, parsed):
 
 async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
     raw_date = parsed.get("entry_date") or None
-    # Validate: ISO format and not in the future
+    # Validate: ISO format and not in the future (using user's local date)
     entry_date = (
         raw_date
-        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= date.today().isoformat())
+        if (raw_date and _ISO_DATE_RE.match(str(raw_date)) and raw_date <= user_today(user_row).isoformat())
         else None
     )
 
     create_expense(user_row["id"], raw, parsed, cat_id, entry_date=entry_date)
     currency = user_row["currency"]
+    tz_name  = user_row.get("timezone", "UTC")
 
     items     = parsed.get("items", [])
     item_line = ""
@@ -358,11 +358,11 @@ async def _save_and_confirm(reply_fn, user_row, raw, parsed, cat_name, cat_id):
 
     cleared_at = user_row.get("history_cleared_at")
     if entry_date:
-        day_total  = get_daily_total(user_row["id"], target_date=entry_date, after=cleared_at)
+        day_total  = get_daily_total(user_row["id"], target_date=entry_date, after=cleared_at, tz_name=tz_name)
         total_line = f"\n{entry_date} total: {fmt(day_total, currency)}"
         date_note  = f" (logged for {entry_date})"
     else:
-        day_total  = get_daily_total(user_row["id"], after=cleared_at)
+        day_total  = get_daily_total(user_row["id"], after=cleared_at, tz_name=tz_name)
         total_line = f"\nToday so far: {fmt(day_total, currency)}"
         date_note  = ""
 

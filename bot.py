@@ -11,7 +11,7 @@ from telegram.ext import (
     filters,
 )
 from config import TELEGRAM_TOKEN
-from handlers.start import build_handler as start_conv
+from handlers.start import build_handler as start_conv, timezone_command, handle_tz_change
 from handlers.expense import handle_text, handle_category_pick
 from handlers.undo import undo, redo, build_edit_handler
 from handlers.gave import gave_summary
@@ -63,6 +63,7 @@ HELP_TEXT = (
     "/savings     — savings summary  (today/week/month/all)\n"
     "/report      — Excel export  (week/month/last month/2 months/year)\n"
     "/clear       — archive history  (data stays in DB; summaries reset to today)\n"
+    "/timezone    — change your timezone\n"
     "/help        — this message"
 )
 
@@ -130,8 +131,10 @@ def main() -> None:
     app.add_handler(CommandHandler("clear",    clear_command))
     app.add_handler(CommandHandler("help",     help_command))
     app.add_handler(CommandHandler("admin",    admin))
+    app.add_handler(CommandHandler("timezone", timezone_command))
 
     app.add_handler(CallbackQueryHandler(handle_category_pick, pattern=r"^cat_pick:"))
+    app.add_handler(CallbackQueryHandler(handle_tz_change,     pattern=r"^tz_change:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     app.add_error_handler(error_handler)

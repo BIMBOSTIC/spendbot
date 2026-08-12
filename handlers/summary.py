@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from telegram import Update
 from telegram.ext import ContextTypes
 from db.queries import get_user, get_summary, get_item_summary_by_prefix
-from utils import fmt
+from utils import fmt, user_today
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,9 @@ def _date_label(d: date, today: date) -> str:
     return f"{d.day} {d.strftime('%b') if d.year == today.year else d.strftime('%b %Y')}"
 
 
-def _resolve_period(arg: str) -> tuple[str, str, str]:
+def _resolve_period(arg: str, today: date | None = None) -> tuple[str, str, str]:
     """Return (start_iso, end_iso, label) for a natural-language period string."""
-    today = date.today()
+    today = today or date.today()
     a     = arg.lower().strip()
 
     # Strip "this " / "current " prefix
@@ -176,9 +176,10 @@ def _resolve_period(arg: str) -> tuple[str, str, str]:
 async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str | None = None) -> None:
     item_prefix = None
     resolved = None
+    today = user_today(user_row)
 
     try:
-        resolved = _resolve_period(period_arg)
+        resolved = _resolve_period(period_arg, today=today)
     except ValueError:
         pass
 
@@ -190,7 +191,7 @@ async def send_summary(reply_fn, user_row: dict, period_arg: str, category: str 
                 continue
             rest = " ".join(words[:i] + words[i + 1:]).strip() or "today"
             try:
-                resolved = _resolve_period(rest)
+                resolved = _resolve_period(rest, today=today)
                 item_prefix = w
                 break
             except ValueError:
