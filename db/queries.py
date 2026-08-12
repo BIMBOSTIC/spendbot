@@ -150,7 +150,7 @@ def delete_entry(entry_id: str, user_id: str) -> None:
 
 def get_daily_total(user_id: str, target_date: str | None = None, after: str | None = None, tz_name: str = "UTC") -> float:
     from zoneinfo import ZoneInfo
-    from datetime import datetime, timezone as _utc
+    from datetime import datetime, timezone as _dt_tz
     try:
         tz = ZoneInfo(tz_name or "UTC")
     except Exception:
@@ -161,8 +161,8 @@ def get_daily_total(user_id: str, target_date: str | None = None, after: str | N
     else:
         d = datetime.now(tz).date()
 
-    start_dt = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz).astimezone(_utc)
-    end_dt   = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=tz).astimezone(_utc)
+    start_dt = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz).astimezone(_dt_tz.utc)
+    end_dt   = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=tz).astimezone(_dt_tz.utc)
     lower = start_dt.strftime("%Y-%m-%dT%H:%M:%S")
     upper = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
