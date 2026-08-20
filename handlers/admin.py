@@ -17,11 +17,18 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         for i, (name, count) in enumerate(s["top_items"])
     ) or "  (none yet)"
 
+    per_user_lines = "\n".join(
+        f"  …{str(u['telegram_id'])[-4:]} ({u['currency']})  {u['entries']} entr{'y' if u['entries'] == 1 else 'ies'}"
+        for u in s["per_user"]
+    ) or "  (none yet)"
+
     await update.message.reply_text(
         f"Admin snapshot — {today}\n"
-        f"{'─' * 28}\n"
-        f"Active users today:   {s['active_users']}\n"
-        f"Entries logged today: {s['total_messages']}\n"
-        f"Parse failures today: {s['parse_failures']}\n\n"
+        f"{'─' * 30}\n"
+        f"Total registered users: {s['total_users']}\n"
+        f"Active today:           {s['active_users']}\n"
+        f"Entries logged today:   {s['total_messages']}\n"
+        f"Parse failures today:   {s['parse_failures']}\n\n"
+        f"Per-user today:\n{per_user_lines}\n\n"
         f"Top items today:\n{top}"
     )

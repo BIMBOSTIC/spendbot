@@ -485,6 +485,7 @@ def get_admin_stats(today: str) -> dict:
     start = f"{today}T00:00:00"
     end   = f"{today}T23:59:59"
 
+    # Today's entries
     entries = (
         db.table("expense_entries")
         .select("id, user_id")
@@ -495,6 +496,37 @@ def get_admin_stats(today: str) -> dict:
 
     active_users   = len({r["user_id"] for r in entries})
     total_messages = len(entries)
+
+    # Per-user entry counts today
+    user_entry_counts: dict[str, int] = {}
+    for r in entries:
+        uid = r["user_id"]
+        user_entry_counts[uid] = user_entry_counts.get(uid, 0) + 1
+
+    # Resolve telegram_ids for the active users
+    per_user_rows: list[dict] = []
+    if user_entry_counts:
+        uid_list = list(user_entry_counts.keys())
+        users_r = (
+            db.table("users")
+            .select("id, telegram_id, currency")
+            .in_("id", uid_list)
+            .execute()
+        ).data
+        for u in users_r:
+            per_user_rows.append({
+                "telegram_id": u["telegram_id"],
+                "currency":    u["currency"],
+                "entries":     user_entry_counts.get(u["id"], 0),
+            })
+        per_user_rows.sort(key=lambda x: x["entries"], reverse=True)
+
+    # Total registered users
+    total_users = 0
+    try:
+        total_users = len(db.table("users").select("id").execute().data)
+    except Exception:
+        pass
 
     top_items: list[tuple[str, int]] = []
     if entries:
@@ -530,6 +562,8 @@ def get_admin_stats(today: str) -> dict:
         "total_messages": total_messages,
         "parse_failures": parse_failures,
         "top_items":      top_items,
+        "total_users":    total_users,
+        "per_user":       per_user_rows,
     }
 
 
