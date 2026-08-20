@@ -225,6 +225,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.exception("Parser failed for input: %s", text)
         log_parse_failure(user_row["id"], text, error_reason=f"parser_exception: {exc}")
         await update.message.reply_text(
+            f"Parser error: {type(exc).__name__}: {exc}\n\n"
             "Couldn't read that. Try:\n"
             "• Expense: bread 100  or  haircut 300\n"
             "• Multiple: bread 100, milk 80\n"
